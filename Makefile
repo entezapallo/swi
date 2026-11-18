@@ -1,66 +1,32 @@
-# Makefile — swi: dos perfiles, AMBOS con la TUI completa.
+# Makefile unificado — swi + fexlswi (repo anidado).
 #
-#   make / make fast   build/       verify + opt verify + llc -O0 + clang -O0 -g
-#                                   -> compila rapido, con simbolos (valgrind)
-#   make opt           build-opt/   verify + opt default<Oz> por modulo,
-#                                   bitcode de todos los modulos + C -> llvm-link
-#                                   -> internalize(main) + globaldce + default<Oz> (LTO)
-#                                   -> llc -O2 static -function/data-sections
-#                                   -> clang -Oz -no-pie + lld --icf=all --gc-sections
-#                                      --strip-all -> binario de tamano minimo
+#   make opt        fexlswi opt + swi opt
+#   make opt-full   fexlswi opt-full + swi opt-full, de una sola corrida
+#   make fast       fexlswi fast + swi fast (iterar/debug)
+#   make selfh      fexlswi selfh + swi selfh
+#   make clean all  limpia ambos proyectos y no compila nada
+#   make install    empaqueta build/ con un binario y una carpeta
 #
-# Por que Oz y no O3 (doc oficial de Clang):
-#   -O3 "may generate larger code (in an attempt to make the program run
-#        faster)"; -Oz "reduces code size further". O3 es para velocidad,
-#        y ese binario ya existe en otro lado. Aca solo importa el tamano.
-#   Se midio Oz(106824) vs Os(102024 con ICF) vs Oz+ICF(99616): gana Oz+ICF.
-#   llc solo acepta -O0..-O3 (no -Oz): la reduccion la hace `opt default<Oz>`
-#   sobre el IR, antes de llc. LTO es full (llvm-link + opt sobre el fused).
-#
-# Ajustes de tamano (perfil opt):
-#   - internalize<preserve-gv=main> + globaldce: solo `main` queda exportado,
-#     el resto de funciones/globales sin uso se elimina entre modulos.
-#   - llc del fusionado con -function-sections/-data-sections: sin esto
-#     --gc-sections e --icf no tienen secciones sobre las que trabajar.
-#   - -no-pie + relocation static (sin PIC) en el fusionado.
-#   - sin unwind tables, stack protector, build-id, relro, separate-code,
-#     .comment.
-#   - dinamico contra la libc del sistema (no estatico).
-#
-# Los dos perfiles producen el MISMO swi: main/in/out (termbox), state,
-# window, canvas, console, win_editor (con todas sus features) y el motor.
-# La diferencia es solo compilacion: iterar rapido vs. binario chico.
-#
-# verify es gate en todos los niveles, incluido el modulo fusionado.
-#
-# Nota: ENGINE_LL lista tambien fsio_ensure_dir, fsio_list_dir, fsio_actions
-# y format; en el binario swi opt, globaldce elimina lo que nadie llama.
-# (Los tests de win_editor linkean LL_OBJ completo, por eso siguen en la lista.)
+# Las recetas de fexlswi viven aca (Makefile mas nuevo, 20:09); las de swi
+# se portaron del Makefile anterior sin restaurar archivos.
 
 LLVM_PREFIX ?=
+FEXL_CC ?= clang --target=x86_64-linux-musl -isystem /usr/include/x86_64-linux-musl
+OPT     ?= opt-21
 CLANG   := $(LLVM_PREFIX)clang-21 --target=x86_64-linux-musl
-OPT     := $(LLVM_PREFIX)opt-21
 LLC     := $(LLVM_PREFIX)llc-21
 LLLINK  := $(LLVM_PREFIX)llvm-link-21
 LLSTRIP := $(LLVM_PREFIX)llvm-strip-21
 LDFLAG_LTO := -fuse-ld=lld-21 -Wl,--icf=all
 
-# Los .ll no declaran `target datalayout`. Sin triple, `opt` usa el layout
-# LLVM por defecto (i64 alineado a 4) y reescribe los GEP de los structs
-# con offsets 4/12/20 en vez de 8/16/24; llc despues los compila con el
-# layout del host y la ABI se rompe. --mtriple lo evita.
+# Los .ll no declaran target datalayout: sin -mtriple la ABI se rompe.
 OPT_TRIPLE := -mtriple=x86_64-linux-musl
 
-# Link dinamico musl, minimo: mismo esquema que el repo anidado fexlswi.
 MUSL_LINK := -L/usr/lib/x86_64-linux-musl \
              -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 \
              -Wl,-rpath,/usr/lib/x86_64-linux-musl
 TEST_LDFLAGS := $(MUSL_LINK) -lm
 
-# ruta ABSOLUTA al interprete batch, derivada del directorio del Makefile
-# (CURDIR = ~/swi -> fexlswi/bin/fexlswi0)
-# Fexl vive en el repo anidado ~/fexlswi. Override:
-#   make FEXL=/otro/fexlswi0 swi-fast
 FEXL ?= fexlswi/bin/fexlswi0
 UI_SCRIPT ?= ui.fxl
 EVAL_DEF := -DSWI_FEXL_BIN="\"$(abspath $(FEXL))\""
@@ -68,12 +34,28 @@ UI_SCRIPT_DEF := -DSWI_UI_SCRIPT="\"$(abspath $(UI_SCRIPT))\""
 
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic
 
-# Dos perfiles finales (opt / selfh), ambos dinamicos musl y de tamano minimo.
-# `fast` sigue disponible para iterar (objetos por modulo, sin LTO).
-ifneq ($(filter opt selfh,$(MODE)),)
+MODULOS := regex_parser regex_compiler regex_abregex regex_thread \
+           regex_runner rx_query rx_runtime
+
+# --- fexlswi: perfiles ---
+FAST_COPT := -O0 -g
+FAST_LINK := -fuse-ld=lld $(MUSL_LINK)
+OPT_COPT := -Oz -ffunction-sections -fdata-sections \
+            -fno-unwind-tables -fno-asynchronous-unwind-tables \
+            -fno-stack-protector -Dtimelocal=mktime
+OPT_LINK := -Oz -fuse-ld=lld $(MUSL_LINK) -Wl,--gc-sections -Wl,--icf=all \
+            -Wl,-O2 -Wl,--build-id=none -s
+FULL_LINK := $(OPT_LINK) -Wl,-z,norelro -Wl,--hash-style=gnu -Wl,--no-rosegment
+
+ATTR_FILTER = sed -E '/^define /{/\)[^)]*([ ](section|align|gc|prefix|prologue|personality|comdat)[ ]|!)[^)]*\{$$/b;s/ \{$$/ nounwind optsize minsize {/}'
+
+# --- swi: perfiles (BUILD cambiado segun MODE) ---
+ifneq ($(filter opt selfh opt-full,$(MODE)),)
 BUILD      := build/$(MODE)
 OPT_PASS   := -passes='verify,default<Oz>'
-ifeq ($(MODE),opt)
+ifeq ($(MODE),opt-full)
+OPT_LTO    := -passes='verify,internalize<preserve-gv=main>,globaldce,default<Oz>,verify'
+else ifeq ($(MODE),opt)
 OPT_LTO    := -passes='verify,internalize<preserve-gv=main>,globaldce,default<Oz>,verify'
 else
 OPT_LTO    := -passes='verify,internalize<preserve-gv=main>,default<Oz>,verify'
@@ -96,64 +78,132 @@ LTO        :=
 endif
 
 CORE  := core
-# Los .ll del motor de regex viven en fexlswi/regex (repo anidado); aca solo
-# quedan format.ll y replace.ll, que son del editor.
 REGEX := fexlswi/regex regex
 FSIO  := fsio
-
 vpath %.ll tui $(CORE) $(REGEX) $(FSIO)
 
-.PHONY: all fast opt selfh install swi-fast swi-opt swi-only run run-opt \
-        test test-opt test-selfh size size-opt size-selfh clean
+.PHONY: all fast opt opt-full selfh install clean \
+        swi-build swi-fast swi-opt swi-only run run-opt \
+        test test-opt test-selfh size size-opt size-selfh
 
-all: $(BUILD)/swi $(BUILD)/test_state $(BUILD)/test_window $(BUILD)/test_canvas \
-     $(BUILD)/test_win_editor $(BUILD)/test_console $(BUILD)/test_memory \
-     $(BUILD)/test_fexl_ui
-	@$(MAKE) --no-print-directory size MODE=$(if $(MODE),$(MODE),fast)
+# `make clean all`: clean limpia ambos y all no vuelve a compilar.
+ifneq ($(filter clean,$(MAKECMDGOALS)),)
+all:
+	@echo "swi + fexlswi limpios"
+else
+all: opt
+endif
 
+# Receta comun de fexlswi. Las variables P_* se fijan por objetivo mas abajo.
+define BUILD_FEXL
+	cd fexlswi/src && ./build clean
+	rm -rf fexlswi/build/$(P)
+	mkdir -p fexlswi/regex/build
+	@for m in $(MODULOS); do \
+		$(P_FILT) fexlswi/regex/$$m.ll \
+		| $(OPT) -mtriple=x86_64-linux-musl -passes='$(P_MOD)' - -o fexlswi/regex/build/$$m.bc || exit 1; \
+	done
+	cd fexlswi/src && \
+		FEXL_CC="$(FEXL_CC)" FEXL_COPT='$(P_COPT)' \
+		FEXL_LDFLAGS='$(P_LINK)' \
+		FEXL_FUSE_OPT='$(P_FUSE)' \
+		./build && \
+		FEXL_CC="$(FEXL_CC)" FEXL_COPT='$(P_COPT)' \
+		FEXL_LDFLAGS='$(P_LINK)' \
+		FEXL_FUSE_OPT='$(P_FUSE)' \
+		./build_regex
+	mkdir -p fexlswi/build/$(P)/bin fexlswi/build/$(P)/lib
+	cp -a fexlswi/bin/. fexlswi/build/$(P)/bin/
+	cp fexlswi/lib/fexlswi.bc fexlswi/build/$(P)/lib/
+	@echo "listo: fexlswi/build/$(P)/bin/fexlswi0 ($(P_MSG))"
+endef
+
+fast: P := fast
+fast: P_COPT := $(FAST_COPT)
+fast: P_LINK := $(FAST_LINK)
+fast: P_FUSE := verify
+fast: P_MOD  := verify
+fast: P_FILT := cat
+fast: P_MSG  := dinamico musl, -O0 -g
 fast:
-	$(MAKE) MODE=fast all
+	$(BUILD_FEXL)
+	$(MAKE) MODE=fast swi-build
 
+opt: P := opt
+opt: P_COPT := $(OPT_COPT)
+opt: P_LINK := $(OPT_LINK)
+opt: P_FUSE := default<Oz>,globaldce
+opt: P_MOD  := verify,default<Oz>
+opt: P_FILT := $(ATTR_FILTER)
+opt: P_MSG  := dinamico musl, -Oz + LTO
 opt:
-	$(MAKE) MODE=opt all
+	$(BUILD_FEXL)
+	$(MAKE) MODE=opt swi-build
 
+opt-full: P := opt-full
+opt-full: P_COPT := $(OPT_COPT)
+opt-full: P_LINK := $(FULL_LINK)
+opt-full: P_FUSE := internalize<preserve-gv=main>,globaldce,default<Oz>
+opt-full: P_MOD  := verify,default<Oz>
+opt-full: P_FILT := $(ATTR_FILTER)
+opt-full: P_MSG  := dinamico musl, -Oz + LTO + internalize
+opt-full:
+	$(BUILD_FEXL)
+	$(MAKE) MODE=opt-full swi-build
+
+selfh: P := selfh
+selfh: P_COPT := $(OPT_COPT)
+selfh: P_LINK := $(OPT_LINK)
+selfh: P_FUSE := default<Oz>
+selfh: P_MOD  := verify,default<Oz>
+selfh: P_FILT := $(ATTR_FILTER)
+selfh: P_MSG  := dinamico musl, -Oz + LTO
 selfh:
-	$(MAKE) MODE=selfh all
+	$(BUILD_FEXL)
+	$(MAKE) MODE=selfh swi-build
 
-# Install: NO compila. Solo empaqueta lo que ya produjo `make opt`.
-# build/ queda con UN binario (swi) y UNA carpeta (fexlswi/).
-# El intérprete se coloca en fexlswi/bin/ porque Fexl busca sus librerías
-# en ../src/lib respecto al binario; por eso se copia tambien src/lib.
+clean:
+	cd fexlswi/src && ./build clean
+	rm -rf fexlswi/build fexlswi/bin fexlswi/lib fexlswi/obj fexlswi/regex/build
+	rm -rf build build-opt .install-build
+	@echo "swi + fexlswi limpios"
+
+# Install: NO compila; empaqueta lo que produjo make opt.
 install:
-	@test -f build/opt/swi || { echo "correr make opt primero"; exit 1; }
+	@test -f build/opt/swi -o -f build/opt-full/swi || \
+		{ echo "correr make opt u opt-full primero"; exit 1; }
 	@test -f fexlswi/bin/fexlswi0 || { echo "compilar fexlswi primero"; exit 1; }
-	rm -rf build/fexlswi build/swi .install-build
+	rm -rf .install-tmp
+	mkdir -p .install-tmp
+	@if [ -f build/opt-full/swi ]; then cp build/opt-full/swi .install-tmp/swi; \
+	 else cp build/opt/swi .install-tmp/swi; fi
+	cp fexlswi/bin/fexlswi0 .install-tmp/fexlswi0
+	cp -a fexlswi/src/lib .install-tmp/lib
+	cp ui.fxl .install-tmp/ui.fxl
+	rm -rf build
 	mkdir -p build/fexlswi/bin build/fexlswi/src
-	cp fexlswi/bin/fexlswi0 build/fexlswi/bin/fexlswi0
-	cp -a fexlswi/src/lib build/fexlswi/src/lib
-	cp ui.fxl build/fexlswi/ui.fxl
-	cp build/opt/swi build/swi
-	rm -rf build/opt build/selfh
+	cp .install-tmp/swi build/swi
+	cp .install-tmp/fexlswi0 build/fexlswi/bin/fexlswi0
+	cp -a .install-tmp/lib build/fexlswi/src/lib
+	cp .install-tmp/ui.fxl build/fexlswi/ui.fxl
+	rm -rf .install-tmp
 	@echo "install listo: build/swi + build/fexlswi/"
 
-# solo el binario swi (sin arneses de test) -- targets pedidos desde la raiz.
-# swi-only se resuelve DENTRO del sub-make (ahi BUILD=build o build-opt segun MODE).
 swi-fast:
-	$(MAKE) MODE=fast swi-only
+	$(MAKE) MODE=fast swi-build
 
 swi-opt:
-	$(MAKE) MODE=opt swi-only
+	$(MAKE) MODE=opt swi-build
 
-swi-only: $(BUILD)/swi
+swi-only: swi-build
+
+swi-build: $(BUILD)/swi
 	@ls -lh $< | awk '{print "swi: " $$5}'
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
 # --- C: frontera con termbox ---
-# En perfil opt se generan bitcode ademas del .o (el .o lo usan los tests,
-# el bitcode se fusiona para el swi LTO).
-
 $(BUILD)/in.o: tui/in.c tui/in.h | $(BUILD)
 	$(CLANG) $(CFLAGS) -I. -c $< -o $@
 
@@ -184,17 +234,12 @@ $(BUILD)/fexl_ui.o: tui/fexl_ui.c tui/fexl_ui.h | $(BUILD)
 $(BUILD)/fexl_ui.bc: tui/fexl_ui.c tui/fexl_ui.h | $(BUILD)
 	$(CLANG) $(CBCFLAGS) -I. -c $< -o $@
 
-# --- IR: un modulo por objeto (lo usan los tests en ambos perfiles) ---
-
+# --- IR: un modulo por objeto / bitcode ---
 $(BUILD)/%.o: %.ll | $(BUILD)
 	$(OPT) $(OPT_TRIPLE) $(OPT_PASS) $< -o - | $(LLC) $(LLC_OPTS) -filetype=obj - -o $@
 
-# --- IR: un modulo por bitcode (solo perfil opt, para el LTO) ---
-
 $(BUILD)/%.bc: %.ll | $(BUILD)
 	$(OPT) $(OPT_TRIPLE) $(OPT_PASS) $< -o $@
-
-# --- modulos que entran en el swi ---
 
 TUI_LL := state window canvas win_editor console memory
 ENGINE_LL := fsio_posix fsio_ensure_dir fsio_list_dir fsio_actions fsio_getdents \
@@ -207,8 +252,6 @@ LL_OBJ := $(addprefix $(BUILD)/,$(addsuffix .o,$(ALL_LL)))
 C_OBJ  := $(addprefix $(BUILD)/,$(addsuffix .o,$(ALL_C)))
 LL_BC  := $(addprefix $(BUILD)/,$(addsuffix .bc,$(ALL_LL)))
 C_BC   := $(addprefix $(BUILD)/,$(addsuffix .bc,$(ALL_C)))
-
-# --- binario swi ---
 
 ifeq ($(LTO),1)
 $(BUILD)/fused.bc: $(LL_BC) $(C_BC)
@@ -235,7 +278,6 @@ endif
 	fi
 
 # --- arneses por modulo ---
-
 $(BUILD)/test_state.o: test/test_state.c tui/in.h | $(BUILD)
 	$(CLANG) $(CFLAGS) -I. -c $< -o $@
 $(BUILD)/test_state: $(BUILD)/test_state.o $(BUILD)/state.o
@@ -303,6 +345,3 @@ size-opt:
 
 size-selfh:
 	$(MAKE) MODE=selfh size
-
-clean:
-	rm -rf build build-opt .install-build

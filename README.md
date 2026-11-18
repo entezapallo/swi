@@ -18,13 +18,16 @@ swi/
 ## Arrancar
 
 ```bash
-make opt          # build/opt/swi  (-Oz + LTO + globaldce)
-make selfh        # build/selfh/swi (-Oz + LTO)
-make fast         # build/swi (-O0, iteración)
+make opt          # fexlswi opt + swi opt
+make opt-full     # fexlswi opt-full + swi opt-full, de una pura volada
+make selfh        # fexlswi selfh + swi selfh
+make fast         # fexlswi fast + swi fast (iterar/debug)
+make clean all    # limpia fexlswi y swi, sin compilar
+make install      # empaqueta build/ con un binario y una carpeta
 ./build/swi archivo.txt
 ```
 
-Para empaquetar: `make clean && make opt && make install`. `build/` queda con
+`make install` funciona después de `opt` u `opt-full`. `build/` queda con
 un solo binario (`swi`) y una sola carpeta (`fexlswi/`).
 
 Primero hace falta el intérprete anidado:
