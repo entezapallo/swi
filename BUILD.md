@@ -10,6 +10,7 @@ make opt       # dinámico musl, -Oz + LTO + globaldce
 make selfh     # dinámico musl, -Oz + LTO, desde fuentes sin pases extra
 make fast      # iteración rápida (-O0, sin LTO), también musl
 make clean
+make install   # solo empaqueta make opt: build/swi + build/fexlswi/
 make test      # suite completa (perfil fast)
 make test-opt
 make test-selfh

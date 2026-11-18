@@ -62,8 +62,9 @@ TEST_LDFLAGS := $(MUSL_LINK) -lm
 # Fexl vive en el repo anidado ~/fexlswi. Override:
 #   make FEXL=/otro/fexlswi0 swi-fast
 FEXL ?= fexlswi/bin/fexlswi0
+UI_SCRIPT ?= ui.fxl
 EVAL_DEF := -DSWI_FEXL_BIN="\"$(abspath $(FEXL))\""
-UI_SCRIPT_DEF := -DSWI_UI_SCRIPT="\"$(abspath $(CURDIR)/ui.fxl)\""
+UI_SCRIPT_DEF := -DSWI_UI_SCRIPT="\"$(abspath $(UI_SCRIPT))\""
 
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic
 
@@ -102,7 +103,7 @@ FSIO  := fsio
 
 vpath %.ll tui $(CORE) $(REGEX) $(FSIO)
 
-.PHONY: all fast opt selfh swi-fast swi-opt swi-only run run-opt \
+.PHONY: all fast opt selfh install swi-fast swi-opt swi-only run run-opt \
         test test-opt test-selfh size size-opt size-selfh clean
 
 all: $(BUILD)/swi $(BUILD)/test_state $(BUILD)/test_window $(BUILD)/test_canvas \
@@ -118,6 +119,22 @@ opt:
 
 selfh:
 	$(MAKE) MODE=selfh all
+
+# Install: NO compila. Solo empaqueta lo que ya produjo `make opt`.
+# build/ queda con UN binario (swi) y UNA carpeta (fexlswi/).
+# El intérprete se coloca en fexlswi/bin/ porque Fexl busca sus librerías
+# en ../src/lib respecto al binario; por eso se copia tambien src/lib.
+install:
+	@test -f build/opt/swi || { echo "correr make opt primero"; exit 1; }
+	@test -f fexlswi/bin/fexlswi0 || { echo "compilar fexlswi primero"; exit 1; }
+	rm -rf build/fexlswi build/swi .install-build
+	mkdir -p build/fexlswi/bin build/fexlswi/src
+	cp fexlswi/bin/fexlswi0 build/fexlswi/bin/fexlswi0
+	cp -a fexlswi/src/lib build/fexlswi/src/lib
+	cp ui.fxl build/fexlswi/ui.fxl
+	cp build/opt/swi build/swi
+	rm -rf build/opt build/selfh
+	@echo "install listo: build/swi + build/fexlswi/"
 
 # solo el binario swi (sin arneses de test) -- targets pedidos desde la raiz.
 # swi-only se resuelve DENTRO del sub-make (ahi BUILD=build o build-opt segun MODE).
@@ -288,4 +305,4 @@ size-selfh:
 	$(MAKE) MODE=selfh size
 
 clean:
-	rm -rf build build-opt
+	rm -rf build build-opt .install-build

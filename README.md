@@ -24,6 +24,9 @@ make fast         # build/swi (-O0, iteración)
 ./build/swi archivo.txt
 ```
 
+Para empaquetar: `make clean && make opt && make install`. `build/` queda con
+un solo binario (`swi`) y una sola carpeta (`fexlswi/`).
+
 Primero hace falta el intérprete anidado:
 
 ```bash
