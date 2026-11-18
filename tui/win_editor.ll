@@ -412,6 +412,23 @@ done:
   ret void
 }
 
+; Acceso al contenedor de spans (busqueda + sintaxis).
+define ptr @win_editor_fmt(ptr %ed) {
+entry:
+  %hfp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 13
+  %hf = load ptr, ptr %hfp
+  ret ptr %hf
+}
+
+; Limpia TODOS los spans. llamar antes de recalcular busqueda o sintaxis.
+define void @win_editor_clear_spans(ptr %ed) {
+entry:
+  %hfp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 13
+  %hf = load ptr, ptr %hfp
+  call void @fmt_clear(ptr %hf)
+  ret void
+}
+
 define i64 @win_editor_hl_count(ptr %ed) {
 entry:
   %hfp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 13
@@ -1614,6 +1631,10 @@ body:
   ; highlight de busqueda (amarillo/bold)
   %style = call i64 @hl_style_at(ptr %hf, i64 %pos)
   %is_hl = icmp eq i64 %style, 1
+  %is_kw = icmp eq i64 %style, 2
+  %is_str = icmp eq i64 %style, 3
+  %is_com = icmp eq i64 %style, 4
+  %is_num = icmp eq i64 %style, 5
   ; seleccion visual (blanco sobre azul): visual != 0 y pos en [sel_lo,sel_hi)
   %vis_on = icmp ne i32 %visual, 0
   %sge = icmp sge i64 %pos, %sel_lo
@@ -1621,7 +1642,13 @@ body:
   %sinrange = and i1 %sge, %slt
   %is_sel = and i1 %vis_on, %sinrange
   ; color: highlight gana, luego seleccion, luego normal
-  %fg_hl = select i1 %is_hl, i32 12, i32 0       ; OUT_BRIGHT_YELLOW
+  ; 1=búsqueda(amarillo) 2=keyword(cian) 3=string(verde)
+  ; 4=comment(gris) 5=number(magenta)
+  %fg_num = select i1 %is_num, i32 14, i32 0     ; OUT_BRIGHT_MAGENTA
+  %fg_com = select i1 %is_com, i32 9, i32 %fg_num ; OUT_BRIGHT_BLACK
+  %fg_str = select i1 %is_str, i32 11, i32 %fg_com ; OUT_BRIGHT_GREEN
+  %fg_kw = select i1 %is_kw, i32 13, i32 %fg_str  ; OUT_BRIGHT_CYAN
+  %fg_hl = select i1 %is_hl, i32 12, i32 %fg_kw   ; OUT_BRIGHT_YELLOW
   %fg_sel = select i1 %is_sel, i32 15, i32 %fg_hl ; OUT_BRIGHT_WHITE
   %bg = select i1 %is_sel, i32 4, i32 0          ; OUT_BLUE
   %attr_hl = select i1 %is_hl, i32 1, i32 0

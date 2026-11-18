@@ -3,6 +3,7 @@
 # del archivo con los modulos en scope.
 load_basic
 load_output
+load_buf
 load_cmp
 load_file
 load_str
@@ -42,6 +43,29 @@ evaluate \;
     fflush stdout
     )
 
+# ---- formateadores de sintaxis (Fexl calcula spans, el motor los aplica) ----
+# FMT_RECALC ('F') viene con el texto en /tmp/swi_fmt_input.txt.
+\\read_all=
+    (\fh
+    \buf=buf_new
+    @\\loop
+    \ch=(fgetc fh)
+    is_undef ch (buf_get buf);
+    buf_put buf ch
+    loop
+    )
+
+\pat_string=(regex.compile "[A-Za-z_][A-Za-z0-9_]*")
+\pat_number=(regex.compile "[0-9]+")
+
+\\emit_fmt=
+    (\txt
+    say ["SPANS 3 " (regex.spans pat_string txt 512)]
+    say ["SPANS 5 " (regex.spans pat_number txt 512)]
+    say "."
+    fflush stdout
+    )
+
 (@\\loop
 \e=(fgetc stdin)
 is_undef e ();
@@ -63,6 +87,10 @@ is_undef cb ();
          ((eq chx 2) "VISUAL" "COMMAND")))
        "NORMAL"))
 \lg2=((eq ce 99) "CMD" "")
-(emit ch2 tc2 fw2 st2 lg2)
-((eq ce 113) () (loop))
+((eq ce 70)
+    (\txt=(read_all (fopen "/tmp/swi_fmt_input.txt" "r"))
+     (emit_fmt txt)
+     (loop))
+    ((emit ch2 tc2 fw2 st2 lg2)
+     ((eq ce 113) () (loop))))
 )

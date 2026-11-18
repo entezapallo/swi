@@ -11,6 +11,11 @@
 #define FUI_ACT_LEN  32
 #define FUI_STATUS_LEN 64
 #define FUI_LOG_LEN 256
+#define FUI_MAX_SPANS 256
+
+typedef struct {
+    int32_t start, len, style;
+} FmtSpan;
 
 typedef struct {
     int32_t console_h;   /* 0 = off, 3 = brief, 10 = extended */
@@ -19,6 +24,8 @@ typedef struct {
     char status[FUI_STATUS_LEN];
     char log[FUI_LOG_LEN];
     char err[128];      /* ultimo error del script, p. ej. Undefined symbol */
+    FmtSpan span[FUI_MAX_SPANS];  /* spans de formato desde Fexl */
+    int32_t nspan;
     struct { char key[FUI_KEY_LEN]; char act[FUI_ACT_LEN]; } bind[FUI_MAX_BINDS];
     int32_t nbind;
 } UiFrame;
@@ -27,7 +34,7 @@ typedef struct {
 enum {
     FUI_INIT = 'i', FUI_CONSOLE = '2', FUI_FILEMAN = '3',
     FUI_TABS = '4', FUI_MODE = 'm', FUI_COMMAND = 'c',
-    FUI_TABCHG = 't', FUI_QUIT = 'q', FUI_EVAL = 'x'
+    FUI_TABCHG = 't', FUI_QUIT = 'q', FUI_EVAL = 'x', FUI_FMT = 'F'
 };
 
 int  fexl_ui_start(const char *fexl_bin, const char *script);

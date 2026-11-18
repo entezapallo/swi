@@ -50,6 +50,7 @@ make -C fexlswi clean all
 | `about.md` | arquitectura y decisiones de diseño |
 | `cheatsheet.md` | teclas, comandos y resolución de problemas |
 | `extend.md` | cómo scriptar y cómo extender la UI |
+| `addformat.md` | cómo agregar formateadores de sintaxis desde Fexl |
 | `spec.md` | especificación original del proyecto |
 
 ## Tests

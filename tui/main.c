@@ -42,6 +42,7 @@
 #define MAX_NAMES 160
 #define MAX_LOG 24
 #define MAX_CWD 512
+#define SWI_FMT_FILE "/tmp/swi_fmt_input.txt"
 
 extern int32_t fsio_ensure_dir(const char *path);
 extern int32_t fsio_list_dir(const char *path, char ***out_names, int64_t *out_count);
@@ -219,6 +220,39 @@ static void toggle_fileman(void)
 static void toggle_tabs(void)
 {
     ui_sync(FUI_TABS, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
+}
+
+/* Pide al driver Fexl los spans de sintaxis del buffer activo y los aplica.
+ * El texto viaja por archivo: ui.fxl lo lee con fgetc y corre regex.spans. */
+static void fmt_send(void *ed)
+{
+    UiFrame f;
+    FILE *fp;
+    char *data;
+    int64_t len, i;
+
+    if (!fexl_ui_alive()) return;
+
+    data = tb_data(doc_textbuffer(win_editor_doc(ed)));
+    len = tb_length(doc_textbuffer(win_editor_doc(ed)));
+    fp = fopen(SWI_FMT_FILE, "wb");
+    if (fp == NULL) return;
+    if (data != NULL && len > 0) fwrite(data, 1, (size_t)len, fp);
+    fclose(fp);
+
+    memset(&f, 0, sizeof(f));
+    fexl_ui_event(FUI_FMT, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w, &f);
+
+    /* set_highlight limpia y agrega los spans de busqueda; los de sintaxis
+     * se agregan DESPUES para que no sean borrados. */
+    if (g_last_pattern[0] != '\0')
+        win_editor_set_highlight(ed, g_last_pattern,
+                                 (int64_t)strlen(g_last_pattern));
+    else
+        win_editor_clear_spans(ed);
+    for (i = 0; i < f.nspan && i < FUI_MAX_SPANS; i++)
+        fmt_add_span(win_editor_fmt(ed), f.span[i].start,
+                     f.span[i].len, f.span[i].style);
 }
 
 static void fileman_load(void)
@@ -481,9 +515,11 @@ static int dispatch(void *st, void *console, void *ed, SwiAction *a)
     }
     flags = win_editor_step(ed, a);
     if (flags & 4) state_set_mode(st, 1);
-    if ((flags & 1) && g_last_pattern[0] != '\0')
+    if ((flags & 1) && g_last_pattern[0] != '\0') {
         win_editor_set_highlight(ed, g_last_pattern,
                                  (int64_t)strlen(g_last_pattern));
+    }
+    if (flags & 1) fmt_send(ed);   /* recalcular spans de sintaxis desde Fexl */
     return flags & 2;
 }
 
@@ -681,6 +717,7 @@ int main(int argc, char **argv)
     void *win = canvas_open(canvas, 0, ed);
     console_set_eval(console, swi_eval);
     if (win == NULL) return 1;
+    fmt_send(ed);     /* resaltado inicial del archivo abierto */
 
     while (!quit && win_editor_quit(ed) == 0) {
         InEvent ev;

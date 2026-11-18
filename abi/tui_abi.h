@@ -75,6 +75,8 @@ extern void    *win_editor_doc(void *ed);
 extern int64_t  win_editor_cursor(void *ed);
 extern void     win_editor_set_cursor(void *ed, int64_t cursor, int64_t top);
 extern void     win_editor_set_highlight(void *ed, const char *pat, int64_t len);
+extern void    *win_editor_fmt(void *ed);
+extern void     win_editor_clear_spans(void *ed);
 extern int64_t  win_editor_hl_count(void *ed);
 extern int64_t  win_editor_anchor(void *ed);
 extern int32_t  win_editor_visual(void *ed);
@@ -111,6 +113,14 @@ extern int32_t  memory_load(void *m, const char *path);
 
 /* --- motor del editor (para el selftest) --- */
 extern void    *doc_textbuffer(void *doc);
+
+/* style_id de los spans de formato (fmt_span_*) */
+enum { FMT_NONE=0, FMT_SEARCH=1, FMT_KEYWORD=2,
+       FMT_STRING=3, FMT_COMMENT=4, FMT_NUMBER=5 };
+
+extern void     fmt_clear(void *fmt);
+extern int32_t  fmt_add_span(void *fmt, int64_t off, int64_t len,
+                             int64_t style_id);
 extern char    *tb_data(void *tb);
 extern int64_t  tb_length(void *tb);
 

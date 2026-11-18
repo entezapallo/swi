@@ -118,6 +118,26 @@ void fexl_ui_event(int ev, int a, int b, int c, UiFrame *out)
                 if (sscanf(line, "FILEMAN_W %d", &out->fileman_w) == 1) continue;
                 if (sscanf(line, "STATUS %63s", out->status) == 1) continue;
                 if (sscanf(line, "LOG %255s", out->log) == 1) continue;
+                if (strncmp(line, "SPANS ", 6) == 0) {
+                    int style = 0;
+                    char list[512];
+                    if (sscanf(line + 6, "%d %511s", &style, list) == 2) {
+                        char *p = list;
+                        while (*p && out->nspan < FUI_MAX_SPANS) {
+                            long s = strtol(p, &p, 10);
+                            if (*p != ',') break;
+                            p++;
+                            long e = strtol(p, &p, 10);
+                            out->span[out->nspan].start = (int32_t)s;
+                            out->span[out->nspan].len = (int32_t)(e - s);
+                            out->span[out->nspan].style = style;
+                            out->nspan++;
+                            if (*p == ';') p++;
+                            else break;
+                        }
+                    }
+                    continue;
+                }
                 if (strncmp(line, "BIND ", 5) == 0 && out->nbind < FUI_MAX_BINDS) {
                     if (sscanf(line + 5, "%15s %31s",
                                out->bind[out->nbind].key,
