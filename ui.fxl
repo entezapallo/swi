@@ -1,0 +1,68 @@
+# ui.fxl — driver Fexl persistente para la TUI de swi.
+# fexlswi0 no trae los builtins preloadados: evaluate \; evalúa el resto
+# del archivo con los modulos en scope.
+load_basic
+load_output
+load_cmp
+load_file
+load_str
+load_extend
+load_regex
+load_script
+evaluate \;
+
+# Los valores del protocolo son pocos (0,1,2,3,10,40). as_str no existe en
+# este build, así que se mapean a literales de dos digitos que el C lee con %d.
+\\num=
+    (\n
+    ((eq n 0) "00"
+     ((eq n 1) "01"
+      ((eq n 2) "02"
+       ((eq n 3) "03"
+        ((eq n 10) "10" ((eq n 40) "40" "??"))))))
+    )
+
+\\emit=
+    (\ch\tc\fw\st\lg
+    say ["CONSOLE_H " (num ch)]
+    say ["TABS_COL " (num tc)]
+    say ["FILEMAN_W " (num fw)]
+    say ["STATUS " st]
+    say ["LOG " lg]
+    say "BIND F2 console.toggle"
+    say "BIND F3 fileman.toggle"
+    say "BIND F4 tabs.collapse"
+    say "BIND C-T tab.new"
+    say "BIND C-W tab.close"
+    say "BIND C-N tab.next"
+    say "BIND C-E console.toggle"
+    say "BIND C-F fileman.toggle"
+    say "BIND C-B tabs.collapse"
+    say "."
+    fflush stdout
+    )
+
+(@\\loop
+\e=(fgetc stdin)
+is_undef e ();
+\ce=(ord e)
+\cb=(fgetc stdin)
+\tb=(fgetc stdin)
+\fb=(fgetc stdin)
+is_undef cb ();
+\chx=(ord cb)
+\tcx=(ord tb)
+\fw=(ord fb)
+\ch2=((eq ce 50) ((eq chx 0) 3 ((eq chx 3) 10 0)) chx)
+\tc2=((eq ce 52) ((eq tcx 0) 1 0) tcx)
+\fw2=((eq ce 51) ((eq fw 0) 40 0) fw)
+\st2=((eq ce 120) "EVAL"
+      ((eq ce 109)
+       ((eq chx 0) "NORMAL"
+        ((eq chx 1) "INSERT"
+         ((eq chx 2) "VISUAL" "COMMAND")))
+       "NORMAL"))
+\lg2=((eq ce 99) "CMD" "")
+(emit ch2 tc2 fw2 st2 lg2)
+((eq ce 113) () (loop))
+)
