@@ -1,4 +1,4 @@
-# swi <img src=".media/logo.jpeg" align="right" height="250" />
+# swi <img src=".media/logo.png" align="right" height="250" />
 
 Editor TUI modal sobre el motor jotter, con un driver Fexl persistente que
 decide el layout y los atajos.
