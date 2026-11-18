@@ -95,7 +95,9 @@ LTO        :=
 endif
 
 CORE  := core
-REGEX := regex
+# Los .ll del motor de regex viven en fexlswi/regex (repo anidado); aca solo
+# quedan format.ll y replace.ll, que son del editor.
+REGEX := fexlswi/regex regex
 FSIO  := fsio
 
 vpath %.ll tui $(CORE) $(REGEX) $(FSIO)
