@@ -15,9 +15,21 @@ int out_cell(int32_t x, int32_t y, int32_t ch,
     return 0;
 }
 
-/* console.ll los declara; main.c los define en el binario real. */
+/* console.ll / fileman.ll los declaran; main.c los define en el binario real. */
 int swi_set_wd(const char *path) { (void)path; return 1; }
 int swi_print_wd(void) { return 1; }
+int out_fill(int32_t x, int32_t y, int32_t w, int32_t h,
+             uint32_t ch, int32_t fg, int32_t bg, int32_t attr)
+{
+    (void)x;(void)y;(void)w;(void)h;(void)ch;(void)fg;(void)bg;(void)attr;
+    return 0;
+}
+int out_text(int32_t x, int32_t y, const char *s,
+             int32_t fg, int32_t bg, int32_t attr)
+{
+    (void)x;(void)y;(void)s;(void)fg;(void)bg;(void)attr;
+    return 0;
+}
 
 static int g_pass = 0;
 static int g_fail = 0;

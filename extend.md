@@ -43,6 +43,7 @@ IR con su test.
 | `tui/win_editor.ll` | Dibujo del buffer, cursor, gutter, movimientos y resaltado. Lee el texto con `doc_read()`. |
 | `tui/console.ll` | Línea de comandos y builtins (`:w`, `:e`, …). |
 | `tui/canvas.ll` | `canvas_layout_panels()`: geometría de tabs/buffer/consola/file manager. |
+| `tui/fileman.ll` | Dueño del cwd, listado, selección y scroll del file manager. |
 | `tui/memory.ll` | Sesión: tabs, cursor, foco, layout, `last_dir`. |
 | `tui/main.c` | Dibujo de tabs, consola y file manager; loop de foco; hot reload; selftest. |
 | `tui/fexl_ui.h/.c` | `UiFrame`: lo que Fexl devuelve al motor. Parser de `SPANS`/`BIND`. |
@@ -252,27 +253,36 @@ Si la tecla es un atajo de **panel** (consola, file manager, tabs), no va en
 
 ## 7. Extender el file manager
 
-El file manager hoy es chrome en `main.c`:
+El file manager vive en **`tui/fileman.ll`** (esto es lo que migró de C a IR).
+`main.c` solo crea el objeto, traduce las teclas del loop y dibuja en su rect:
 
-| Función | Rol |
+| Función (IR) | Rol |
 |---|---|
-| `fileman_load()` | listado del directorio `g_fileman_dir` vía `fsio_list_dir` |
-| `fileman_open(new_tab)` | abre la entrada elegida, en tab actual o nueva |
-| `fileman_parent()` | sube un nivel |
-| `toggle_fileman()` | `ui_sync(FUI_FILEMAN)` + `fileman_load()` + set_focus(2) |
-| `fileman_draw()` | `out_text` de cada entrada; `..` siempre es la primera |
+| `fileman_new/destroy` | ciclo de vida del struct `{ cwd, names, n, sel, top }` |
+| `fileman_load` | listado vía `fsio_list_dir`; `..` siempre es la primera entrada |
+| `fileman_set_sel` | selección con clamp |
+| `fileman_scroll(fm, rows)` | ajusta `top` para que la selección quede visible |
+| `fileman_chdir` | valida con `chdir`, normaliza con `getcwd`, recarga |
+| `fileman_is_dir` | usa `fsio_list_dir` para decidir si una entrada es directorio |
+| `fileman_parent` | sube un nivel (resuelve rutas relativas antes de recortar) |
+| `fileman_draw` | cabecera `[files] <cwd>  sel/n` y entradas desde `top` |
+
+En `main.c` quedan `fileman_open()` (abre un archivo o tab), `toggle_fileman()`
+(`ui_sync(FUI_FILEMAN)` + `fileman_load` + `set_focus(2)`) y `g_fm_rows`, que se
+calcula en `draw()` y usa el loop para `PageUp/Down`.
 
 Para agregar, por ejemplo, orden por fecha:
 
-1. `fsio_list_dir` ya entrega nombre; necesitás `stat`. Agregá un módulo IR
-   `fsio/fsio_stat.ll` (o extendé `fsio_list_dir`) con `declare` en
-   `abi/tui_abi.h`.
-2. Ordená en `fileman_load()` **después** de traer el listado, no en el IR de
-   `fsio` (ese módulo no debe saber de UI).
+1. `fsio_list_dir` entrega solo nombres; necesitás metadatos. Agregá un
+   módulo IR `fsio/fsio_stat.ll` (o extendé `fsio_list_dir`) con `declare` en
+   `abi/tui_abi.h`. Ojo: llamar a `stat(2)` desde IR con musl dio problemas
+   en este build; `fsio_chdir`/`fsio_list_dir` son alternativas probadas.
+2. Ordená en `fileman_load()` (IR) **después** de traer el listado, no en el
+   IR de `fsio` (ese módulo no debe saber de UI).
 3. Agregá una tecla en el loop de `main.c` (con su `BIND` en `ui.fxl`) para
    cambiar el criterio de orden.
-4. Test: `test/test_memory.c` cubre `last_dir`; el ordenamiento nuevo merece
-   su propio arnés si va en IR.
+4. Test: `test/test_fileman.c` ya cubre listado, scroll y dibujo;sumá ahí el
+   caso de orden nuevo.
 
 ---
 

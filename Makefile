@@ -253,7 +253,7 @@ $(BUILD)/%.o: %.ll | $(BUILD)
 $(BUILD)/%.bc: %.ll | $(BUILD)
 	$(OPT) $(OPT_TRIPLE) $(OPT_PASS) $< -o $@
 
-TUI_LL := state window canvas win_editor console memory
+TUI_LL := state window canvas win_editor console memory fileman
 ENGINE_LL := fsio_posix fsio_ensure_dir fsio_list_dir fsio_actions fsio_getdents \
              textbuffer lineindex document history find chunk \
              replace regex_parser regex_compiler regex_thread regex_runner format
@@ -315,6 +315,11 @@ $(BUILD)/test_console.o: test/test_console.c tui/in.h | $(BUILD)
 $(BUILD)/test_console: $(BUILD)/test_console.o $(BUILD)/console.o
 	$(CLANG) $(TEST_LDFLAGS) $^ -o $@
 
+$(BUILD)/test_fileman.o: test/test_fileman.c | $(BUILD)
+	$(CLANG) $(CFLAGS) -I. -c $< -o $@
+$(BUILD)/test_fileman: $(BUILD)/test_fileman.o $(BUILD)/fileman.o
+	$(CLANG) $(TEST_LDFLAGS) $^ -o $@
+
 $(BUILD)/test_memory.o: test/test_memory.c | $(BUILD)
 	$(CLANG) $(CFLAGS) -I. -c $< -o $@
 $(BUILD)/test_memory: $(BUILD)/test_memory.o $(BUILD)/memory.o
@@ -332,13 +337,14 @@ run-opt:
 	$(MAKE) MODE=opt run
 
 test: $(BUILD)/test_state $(BUILD)/test_window $(BUILD)/test_canvas \
-      $(BUILD)/test_win_editor $(BUILD)/test_console $(BUILD)/test_memory \
-      $(BUILD)/test_fexl_ui $(BUILD)/swi
+      $(BUILD)/test_win_editor $(BUILD)/test_console $(BUILD)/test_fileman \
+      $(BUILD)/test_memory $(BUILD)/test_fexl_ui $(BUILD)/swi
 	./$(BUILD)/test_state
 	./$(BUILD)/test_window
 	./$(BUILD)/test_canvas
 	./$(BUILD)/test_win_editor
 	./$(BUILD)/test_console
+	./$(BUILD)/test_fileman
 	./$(BUILD)/test_memory
 	./$(BUILD)/test_fexl_ui
 	./$(BUILD)/swi --selftest

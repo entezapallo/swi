@@ -48,9 +48,11 @@ En INSERT, `h/j/k/l` son **texto**; las flechas son movimientos.
 | `Ctrl+Q` / `F10` | salir (desde cualquier foco) |
 
 En el file manager: `j/k` o flechas, `Enter` abre, `h`/`Backspace` sube,
-`t` abre en tab nueva, `..` es la primera entrada. **Navegar no cambia el wd
-del proceso**: para eso usá `:swd` (sin ruta toma el directorio que estás
-viendo). El wd se restaura de la sesión al arrancar.
+`t` abre en tab nueva, `..` es la primera entrada. Con más entradas que filas
+hay **scroll**: `PageUp`/`PageDown` (o `Ctrl+U`/`Ctrl+D`) saltan una página,
+`Home`/`End` van al inicio/final, y la cabecera muestra `sel/n`. **Navegar no
+cambia el wd del proceso**: para eso usá `:swd` (sin ruta toma el directorio
+que estás viendo). El wd se restaura de la sesión al arrancar.
 
 `F2`/`F3`/`F4` son equivalentes a `Ctrl+E/F/B`, pero puede capturarlos el
 gestor de escritorio (F3 abre el launcher en XFCE).

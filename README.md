@@ -90,7 +90,7 @@ reconstruir solo el intérprete, `make -C fexlswi clean all` sigue funcionando.
 ## Tests
 
 ```bash
-make test                  # 162 checks, perfil fast
+make test                  # 183 checks, perfil fast
 make test-opt
 make MODE=opt-full test
 make test-selfh

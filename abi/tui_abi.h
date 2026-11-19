@@ -84,6 +84,24 @@ extern int32_t  win_editor_dirty(void *ed);
 extern int32_t  win_editor_quit(void *ed);
 extern const char *win_editor_path(void *ed);
 
+/* --- fileman.ll: estado del file manager con scroll --- */
+extern void    *fileman_new(void);
+extern void     fileman_destroy(void *fm);
+extern char    *fileman_cwd(void *fm);
+extern int64_t  fileman_count(void *fm);
+extern int64_t  fileman_sel(void *fm);
+extern int64_t  fileman_top(void *fm);
+extern char    *fileman_name(void *fm, int64_t i);
+extern void     fileman_set_sel(void *fm, int64_t sel);
+extern void     fileman_set_cwd(void *fm, const char *path);
+extern void     fileman_load(void *fm);
+extern void     fileman_scroll(void *fm, int64_t rows);
+extern void     fileman_parent(void *fm);
+extern int32_t  fileman_chdir(void *fm, const char *path);
+extern int32_t  fileman_is_dir(void *fm, const char *name);
+extern void     fileman_draw(void *fm, int32_t x, int32_t y,
+                             int32_t w, int32_t h);
+
 /* --- console.ll --- */
 extern void    *console_new(void);
 extern void     console_destroy(void *c);
