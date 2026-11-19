@@ -1,98 +1,132 @@
-# fexlswi — Fexl + extension regex + motor jotter.
+# fexlswi — Fexl + extensión regex + motor jotter.
 #
-#   make opt     dinamico musl, -Oz + LTO optimizado al minimo
-#   make selfh   dinamico musl, -Oz + LTO, build desde fuentes sin pases extra
-#   make clean   borra bin/, lib/, obj/, regex/build/ y build/
+# Build 100% Make. Los scripts shell heredados del upstream (src/build,
+# src/build_lib, src/build_regex, src/lib_build y build.sh) se eliminaron:
+# antes había dos sistemas de build (Make + shell) y la lógica de regex estaba
+# duplicada en este Makefile y en el de ~/swi. Ahora hay un solo lugar con
+# los flags y un solo set de reglas.
 #
-# Unicos binarios finales: fexlswi y fexlswi0 (mismo ELF, el sufijo 0
-# evita cargar main.fxl). Ambos perfiles dejan sus copias en build/<perfil>/bin
-# y refrescan bin/ (que es lo que usa el proyecto hermano ~/swi).
+#   make fast / opt / opt-full / selfh   perfiles (todos musl dinámico)
+#   make clean                           borra todos los generados
 #
-# Ajustes de tamano (ambos perfiles):
-#   - musl dinamico real: -L al dir de musl + dynamic-linker + rpath (mismo
-#     esquema que ~/swi). Sin -L, clang con --target=...-musl puede terminar
-#     enlazando glibc (se vio en el binario: __gconv, _nl_load_domain, stapsdt).
-#   - C sin unwind tables ni stack protector, con function/data-sections.
-#   - lld con --gc-sections, --icf=all, -O2, sin build-id, strip.
-#   - los .ll de regex reciben nounwind/optsize/minsize antes de opt (clang -Oz
-#     los pone solo en C; los .ll no los traen).
+# Unicos binarios finales: bin/fexlswi y bin/fexlswi0 (mismo ELF con distinto
+# nombre: el sufijo 0 evita cargar main.fxl). lib/fexlswi.bc es el bitcode
+# fusionado que usa swi para reproducir el build de opt.
 
 FEXL_CC ?= clang --target=x86_64-linux-musl -isystem /usr/include/x86_64-linux-musl
 OPT     ?= opt-21
+LLLINK  ?= llvm-link-21
 
 MODULOS := regex_parser regex_compiler regex_abregex regex_thread \
            regex_runner rx_query rx_runtime
 
-# Los 11 modulos regex viven en regex/ en la raiz del repo (~/swi).
-# RXDIR es relativo a la raiz de fexlswi; build_regex ya usa ../regex/build.
-RXDIR    := ../regex
-RX_TYPES := $(RXDIR)/rx_types.ll
+# Modulos C del interprete Fexl (antes enumerados a mano en src/build).
+FEXL_MODS := base64 basic bn buf buf_str convert crypto die file file_str \
+             format limit memory nacl parse report sha256 sha512 show str \
+             stream test type_argv type_bn type_buf type_cmp type_crypto \
+             type_fexl type_file type_hex type_input type_istr type_limit \
+             type_math type_num type_output type_parse type_rand type_record \
+             type_run type_signal type_stream type_str type_sym type_time \
+             type_tuple type_var value
 
-# musl dinamico, tamano minimo: mismo esquema que ~/swi
+SRC := src
+OBJ := obj
+LIB := lib
+BIN := bin
+RXDIR := ../regex
+RXBUILD := $(RXDIR)/build
+
 MUSL_LINK := -L/usr/lib/x86_64-linux-musl \
              -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 \
              -Wl,-rpath,/usr/lib/x86_64-linux-musl
+
 LINK := -Oz -fuse-ld=lld $(MUSL_LINK) -Wl,--gc-sections -Wl,--icf=all \
         -Wl,-O2 -Wl,--build-id=none -s
-# flags de compilacion C: sin unwind tables ni stack protector
-COPT := -Oz -ffunction-sections -fdata-sections \
-        -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-stack-protector \
-        -Dtimelocal=mktime
-        
-.PHONY: all opt selfh clean
+FULL_LINK := $(LINK) -Wl,-z,norelro -Wl,--hash-style=gnu -Wl,--no-rosegment
 
+# agrega nounwind/optsize/minsize a los define del IR (clang -Oz lo hace en C)
+ATTR_FILTER = sed -E '/^define /{/\)[^)]*([ ](section|align|gc|prefix|prologue|personality|comdat)[ ]|!)[^)]*\{$$/b;s/ \{$$/ nounwind optsize minsize {/}'
+
+# type_file.c usa open()/O_* sin incluir <fcntl.h> (el upstream compilaba
+# con headers glibc donde <sys/file.h> lo traia). -include lo garantiza con
+# musl sin tocar el codigo del interprete.
+FEXL_EXTRA_INC := -include fcntl.h
+
+COPT := -Oz -ffunction-sections -fdata-sections -fvisibility=hidden \
+        -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-ident \
+        -fno-stack-protector -Wall -Werror -Wunused-parameter \
+        -Wdeclaration-after-statement -Dtimelocal=mktime -I src $(FEXL_EXTRA_INC)
+
+# defaults (los perfiles los sobrescriben)
+LDFLAGS ?= $(LINK)
+FUSE    ?= verify
+RXFILT  ?= cat
+RXPASS  ?= verify
+FAST_COPT := -O0 -g -fno-stack-protector -Dtimelocal=mktime -I src $(FEXL_EXTRA_INC)
+
+FEXL_CORE_BC := $(addprefix $(OBJ)/,$(addsuffix .bc,$(FEXL_MODS)))
+RX_BC := $(addprefix $(RXBUILD)/,$(addsuffix .bc,$(MODULOS)))
+
+.PHONY: all fast opt opt-full selfh clean
 all: opt selfh
 
-# compilar los 7 modulos IR, todos con target musl y tamano minimo.
-# El sed agrega nounwind optsize minsize a cada `define` (se salta las que
-# llevan section/align/gc/prefix/prologue/personality/comdat o metadata tras
-# la lista de argumentos).
-define REGLAS_REGEX
-	mkdir -p $(RXDIR)/build
-	@for m in $(MODULOS); do \
-		{ cat $(RX_TYPES); \
-		  sed -E '/^define /{/\)[^)]*([ ](section|align|gc|prefix|prologue|personality|comdat)[ ]|!)[^)]*\{$$/b;s/ \{$$/ nounwind optsize minsize {/}' $(RXDIR)/$$m.ll; } \
-		| $(OPT) -mtriple=x86_64-linux-musl -passes='verify,default<Oz>' - -o $(RXDIR)/build/$$m.bc || exit 1; \
-	done
-endef
+# --- perfiles: un solo lugar con los flags ---
+fast: LDFLAGS := -fuse-ld=lld $(MUSL_LINK)
+fast: COPT := $(FAST_COPT)
+fast: FUSE := verify
+fast: RXFILT := cat
+fast: RXPASS := verify
 
-opt:
-	cd src && ./build clean
-	rm -rf build/opt
-	$(REGLAS_REGEX)
-	cd src && \
-		FEXL_CC="$(FEXL_CC)" FEXL_COPT='$(COPT)' \
-		FEXL_LDFLAGS='$(LINK)' \
-		FEXL_FUSE_OPT='default<Oz>,globaldce' \
-		./build && \
-		FEXL_CC="$(FEXL_CC)" FEXL_COPT='$(COPT)' \
-		FEXL_LDFLAGS='$(LINK)' \
-		FEXL_FUSE_OPT='default<Oz>,globaldce' \
-		./build_regex
-	mkdir -p build/opt/bin build/opt/lib
-	cp -a bin/. build/opt/bin/
-	cp lib/fexlswi.bc build/opt/lib/
-	@echo "listo: build/opt/bin/fexlswi0 (dinamico musl, -Oz + LTO)"
+opt: FUSE := default<Oz>,globaldce
+opt: RXFILT := $(ATTR_FILTER)
+opt: RXPASS := verify,default<Oz>
 
-selfh:
-	cd src && ./build clean
-	rm -rf build/selfh
-	$(REGLAS_REGEX)
-	cd src && \
-		FEXL_CC="$(FEXL_CC)" FEXL_COPT='$(COPT)' \
-		FEXL_LDFLAGS='$(LINK)' \
-		FEXL_FUSE_OPT='default<Oz>' \
-		./build && \
-		FEXL_CC="$(FEXL_CC)" FEXL_COPT='$(COPT)' \
-		FEXL_LDFLAGS='$(LINK)' \
-		FEXL_FUSE_OPT='default<Oz>' \
-		./build_regex
-	mkdir -p build/selfh/bin build/selfh/lib
-	cp -a bin/. build/selfh/bin/
-	cp lib/fexlswi.bc build/selfh/lib/
-	@echo "listo: build/selfh/bin/fexlswi0 (dinamico musl, -Oz + LTO)"
+opt-full: LDFLAGS := $(FULL_LINK)
+opt-full: FUSE := internalize<preserve-gv=main>,globaldce,default<Oz>
+opt-full: RXFILT := $(ATTR_FILTER)
+opt-full: RXPASS := verify,default<Oz>
+
+selfh: FUSE := default<Oz>
+selfh: RXFILT := $(ATTR_FILTER)
+selfh: RXPASS := verify,default<Oz>
+
+fast opt opt-full selfh: $(BIN)/fexlswi $(BIN)/fexlswi0
+
+# --- directorios ---
+$(OBJ) $(LIB) $(BIN) $(RXBUILD):
+	mkdir -p $@
+
+# --- C -> bitcode ---
+$(OBJ)/%.bc: $(SRC)/%.c | $(OBJ)
+	$(FEXL_CC) -c -emit-llvm $(COPT) $< -o $@
+
+# fexl.c se recompila con JOTTER_REGEX para exponer la extension.
+$(OBJ)/fexl_regex.bc: $(SRC)/fexl.c | $(OBJ)
+	$(FEXL_CC) -c -emit-llvm $(COPT) -DJOTTER_REGEX $< -o $@
+
+# --- 7 modulos IR: rx_types.ll se inyecta por concatenacion ---
+$(RXBUILD)/%.bc: $(RXDIR)/%.ll $(RXDIR)/rx_types.ll | $(RXBUILD)
+	{ cat $(RXDIR)/rx_types.ll; $(RXFILT) $<; } \
+	| $(OPT) -mtriple=x86_64-linux-musl -passes='$(RXPASS)' - -o $@
+
+# --- bitcode fusionado ---
+$(LIB)/fexlswi.bc: $(FEXL_CORE_BC) $(OBJ)/fexl_regex.bc \
+                   $(OBJ)/type_regex.bc $(OBJ)/type_script.bc $(RX_BC) | $(LIB)
+	$(LLLINK) $(FEXL_CORE_BC) $(OBJ)/fexl_regex.bc \
+		$(OBJ)/type_regex.bc $(OBJ)/type_script.bc $(RX_BC) -o $@
+	@if [ "$(FUSE)" != "verify" ]; then \
+		$(OPT) -mtriple=x86_64-linux-musl -passes='$(FUSE)' $@ -o $@.tmp && \
+		mv $@.tmp $@; \
+	fi
+
+# --- binarios finales ---
+$(BIN)/fexlswi: $(LIB)/fexlswi.bc | $(BIN)
+	$(FEXL_CC) $(LDFLAGS) $< -lm -o $@
+
+# copia real, no symlink: el sufijo 0 evita cargar main.fxl.
+$(BIN)/fexlswi0: $(BIN)/fexlswi
+	cp $< $@
 
 clean:
-	cd src && ./build clean
-	rm -rf build bin lib obj $(RXDIR)/build
-	@echo "limpio"
+	rm -rf $(BIN) $(LIB) $(OBJ) $(RXBUILD) build
+	@echo "fexlswi limpio"

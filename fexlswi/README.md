@@ -2,6 +2,11 @@
 > particularidades de este build (extensión regex, módulos compartidos en
 > `../regex/`, binarios `fexlswi`/`fexlswi0` y perfiles) están en
 > [`BUILD.md`](BUILD.md) y en [`../scripting.md`](../scripting.md).
+>
+> **Los comandos `./build` y `./fexl` de abajo son del build legacy del
+> upstream y ya no existen acá.** El build real es `make` desde esta carpeta
+> (o `make -C fexlswi <perfil>` desde `~/swi`). Los binarios quedan en
+> `bin/fexlswi` y `bin/fexlswi0`.
 
 # fexl - Function EXpression Language
 
@@ -45,27 +50,27 @@ names of any files it might need that come bundled with the distribution.
 
 To build the code:
 ```
-./build
+make
 ```
 
 To erase the output files and build the code from scratch:
 ```
-./build clean
+make clean
 ```
 
 To erase the output files:
 ```
-./build erase
+make clean
 ```
 
 To do a verbose build, showing all the commands:
 ```
-verbose=1 ./build
+verbose=1 make
 ```
 
 To build the code and run a fexl program:
 ```
-./fexl [FILE]
+bin/fexlswi [FILE]
 ```
 
 To build the code and check all the tests:

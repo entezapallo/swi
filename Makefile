@@ -34,20 +34,8 @@ UI_SCRIPT_DEF := -DSWI_UI_SCRIPT="\"$(abspath $(UI_SCRIPT))\""
 
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic
 
-MODULOS := regex_parser regex_compiler regex_abregex regex_thread \
-           regex_runner rx_query rx_runtime
-
-# --- fexlswi: perfiles ---
-FAST_COPT := -O0 -g
-FAST_LINK := -fuse-ld=lld $(MUSL_LINK)
-OPT_COPT := -Oz -ffunction-sections -fdata-sections \
-            -fno-unwind-tables -fno-asynchronous-unwind-tables \
-            -fno-stack-protector -Dtimelocal=mktime
-OPT_LINK := -Oz -fuse-ld=lld $(MUSL_LINK) -Wl,--gc-sections -Wl,--icf=all \
-            -Wl,-O2 -Wl,--build-id=none -s
-FULL_LINK := $(OPT_LINK) -Wl,-z,norelro -Wl,--hash-style=gnu -Wl,--no-rosegment
-
-ATTR_FILTER = sed -E '/^define /{/\)[^)]*([ ](section|align|gc|prefix|prologue|personality|comdat)[ ]|!)[^)]*\{$$/b;s/ \{$$/ nounwind optsize minsize {/}'
+# fexlswi tiene su propio Makefile: los perfiles y flags viven en fexlswi/Makefile.
+# Aca solo se delega; no se duplican reglas de build ni de modulos regex.
 
 # --- swi: perfiles (BUILD cambiado segun MODE) ---
 ifneq ($(filter opt selfh opt-full,$(MODE)),)
@@ -97,77 +85,38 @@ else
 all: opt
 endif
 
-# Receta comun de fexlswi. Las variables P_* se fijan por objetivo mas abajo.
+# fexlswi se compila con su propio Makefile: aca solo se delega.
 define BUILD_FEXL
-	cd fexlswi/src && ./build clean
-	rm -rf fexlswi/build/$(P)
-	mkdir -p regex/build
-	@for m in $(MODULOS); do \
-		{ cat $(RX_TYPES); $(P_FILT) regex/$$m.ll; } \
-		| $(OPT) -mtriple=x86_64-linux-musl -passes='$(P_MOD)' - -o regex/build/$$m.bc || exit 1; \
-	done
-	cd fexlswi/src && \
-		FEXL_CC="$(FEXL_CC)" FEXL_COPT='$(P_COPT)' \
-		FEXL_LDFLAGS='$(P_LINK)' \
-		FEXL_FUSE_OPT='$(P_FUSE)' \
-		./build && \
-		FEXL_CC="$(FEXL_CC)" FEXL_COPT='$(P_COPT)' \
-		FEXL_LDFLAGS='$(P_LINK)' \
-		FEXL_FUSE_OPT='$(P_FUSE)' \
-		./build_regex
+	rm -rf fexlswi/build/$(P) fexlswi/bin fexlswi/lib fexlswi/obj regex/build
+	$(MAKE) -C fexlswi $(P)
 	mkdir -p fexlswi/build/$(P)/bin fexlswi/build/$(P)/lib
 	cp -a fexlswi/bin/. fexlswi/build/$(P)/bin/
 	cp fexlswi/lib/fexlswi.bc fexlswi/build/$(P)/lib/
-	@echo "listo: fexlswi/build/$(P)/bin/fexlswi0 ($(P_MSG))"
+	@echo "listo: fexlswi/build/$(P)/bin/fexlswi0"
 endef
 
 fast: P := fast
-fast: P_COPT := $(FAST_COPT)
-fast: P_LINK := $(FAST_LINK)
-fast: P_FUSE := verify
-fast: P_MOD  := verify
-fast: P_FILT := cat
-fast: P_MSG  := dinamico musl, -O0 -g
 fast:
 	$(BUILD_FEXL)
 	$(MAKE) MODE=fast swi-build
 
 opt: P := opt
-opt: P_COPT := $(OPT_COPT)
-opt: P_LINK := $(OPT_LINK)
-opt: P_FUSE := default<Oz>,globaldce
-opt: P_MOD  := verify,default<Oz>
-opt: P_FILT := $(ATTR_FILTER)
-opt: P_MSG  := dinamico musl, -Oz + LTO
 opt:
 	$(BUILD_FEXL)
 	$(MAKE) MODE=opt swi-build
 
 opt-full: P := opt-full
-opt-full: P_COPT := $(OPT_COPT)
-opt-full: P_LINK := $(FULL_LINK)
-opt-full: P_FUSE := internalize<preserve-gv=main>,globaldce,default<Oz>
-opt-full: P_MOD  := verify,default<Oz>
-opt-full: P_FILT := $(ATTR_FILTER)
-opt-full: P_MSG  := dinamico musl, -Oz + LTO + internalize
 opt-full:
 	$(BUILD_FEXL)
 	$(MAKE) MODE=opt-full swi-build
 
 selfh: P := selfh
-selfh: P_COPT := $(OPT_COPT)
-selfh: P_LINK := $(OPT_LINK)
-selfh: P_FUSE := default<Oz>
-selfh: P_MOD  := verify,default<Oz>
-selfh: P_FILT := $(ATTR_FILTER)
-selfh: P_MSG  := dinamico musl, -Oz + LTO
 selfh:
 	$(BUILD_FEXL)
 	$(MAKE) MODE=selfh swi-build
 
 clean:
-	cd fexlswi/src && ./build clean
-	rm -rf fexlswi/build fexlswi/bin fexlswi/lib fexlswi/obj regex/build
+	$(MAKE) -C fexlswi clean
 	rm -rf build build-opt .install-build
 	@echo "swi + fexlswi limpios"
 
