@@ -50,32 +50,30 @@ extern int32_t fsio_list_dir(const char *path, char ***out_names, int64_t *out_c
 extern void fsio_free_dir_list(char **names, int64_t count);
 extern char *fsio_path_join(const char *dir, const char *name);
 
-static int g_pass = 0, g_fail = 0;
-static char g_eval_msg[512];
-static char g_last_pattern[256];
+int g_pass = 0, g_fail = 0;
+char g_eval_msg[512];
+char g_last_pattern[256];
 
 /* estado de la UI (Fexl decide los tres primeros campos) */
-static UiFrame g_ui;
-static void *g_tabs[MAX_TABS];
-static int g_tab_focus[MAX_TABS];
-static int g_ntabs = 0, g_active = 0;
-static time_t g_script_mtime = 0;
-static long g_script_mtime_ns = 0;
-static void *g_fileman = NULL;   /* dueño del cwd/listado/scroll (fileman.ll) */
-static int g_fm_rows = 0;        /* filas visibles, calculadas en draw() */
-static char g_clog[MAX_LOG][200];
-static int g_clog_n = 0;
-static char g_cmd[256];
-static int g_cmd_len = 0;
-static int g_focus = 0;   /* 0=buffer, 1=consola, 2=file manager */
+UiFrame g_ui;
+void *g_tabs[MAX_TABS];
+int g_tab_focus[MAX_TABS];
+int g_ntabs = 0, g_active = 0;
+time_t g_script_mtime = 0;
+long g_script_mtime_ns = 0;
+void *g_fileman = NULL;   /* dueño del cwd/listado/scroll (fileman.ll) */
+int g_fm_rows = 0;        /* filas visibles, calculadas en draw() */
+char g_clog[MAX_LOG][200];
+int g_clog_n = 0;
+char g_cmd[256];
+int g_cmd_len = 0;
+int g_focus = 0;   /* 0=buffer, 1=consola, 2=file manager */
 
 #define SELF_CHECK(cond, msg) do { \
     if (cond) { printf("  OK   - %s\n", msg); g_pass++; } \
     else      { printf("  FAIL - %s\n", msg); g_fail++; } \
 } while (0)
 
-static void tab_new(const char *path);
-static int  wd_apply(const char *path, int quiet);
 
 static void usage(const char *prog)
 {
@@ -84,213 +82,33 @@ static void usage(const char *prog)
     fprintf(stderr, "  Ctrl+T tab nueva  Ctrl+W cerrar  Ctrl+Q salir\n");
 }
 
-static void log_add(const char *s)
-{
-    int i;
-    if (s == NULL || s[0] == '\0') return;
-    if (g_clog_n == MAX_LOG) {
-        for (i = 1; i < MAX_LOG; i++)
-            memcpy(g_clog[i - 1], g_clog[i], sizeof(g_clog[0]));
-        g_clog_n--;
-    }
-    strncpy(g_clog[g_clog_n], s, sizeof(g_clog[0]) - 1);
-    g_clog[g_clog_n][sizeof(g_clog[0]) - 1] = '\0';
-    g_clog_n++;
-}
 
 /* Envia un evento al driver y aplica el frame. Fexl puede agregar una linea
  * de LOG; el motor agrega la salida real de los comandos. */
-static void ui_sync(int ev, int a, int b, int c)
-{
-    fexl_ui_event(ev, a, b, c, &g_ui);
-    if (g_ui.err[0]) {
-        log_add(g_ui.err);
-        g_ui.err[0] = '\0';
-    }
-    if (g_ui.log[0] && strcmp(g_ui.log, "CMD") != 0)
-        log_add(g_ui.log);
-}
 
 /* El foco vive por tab: al cambiar de tab se recupera el del otro buffer. */
-static void set_focus(int f)
-{
-    g_focus = f;
-    if (g_active >= 0 && g_active < MAX_TABS) g_tab_focus[g_active] = f;
-}
 
 /* Un BIND solo existe si Fexl lo emitio en el ultimo frame. Si el driver
  * no esta disponible (nbind==0) se usa el mapping historico por robustez. */
-static int has_bind(const char *act)
-{
-    int i;
-    if (g_ui.nbind == 0) return 1;
-    for (i = 0; i < g_ui.nbind; i++)
-        if (strcmp(g_ui.bind[i].act, act) == 0) return 1;
-    return 0;
-}
 
 /* Sesion: un solo dueno (C). Fexl solo transforma el estado que le pasamos;
  * el estado persistente (tabs, cursor, foco, layout, cwd) se guarda aca. */
-static void session_save_all(void)
-{
-    void *m = memory_new();
-    char buf[128];
-    int i;
 
-    if (m == NULL) return;
-    fsio_ensure_dir(SWI_SESSION_DIR);
-    for (i = 0; i < g_ntabs; i++) {
-        const char *p = win_editor_path(g_tabs[i]);
-        memory_add(m, SWI_KIND_EDITOR, p ? p : "",
-                   p ? (int64_t)strlen(p) : 0,
-                   win_editor_cursor(g_tabs[i]), g_tab_focus[i]);
-    }
-    snprintf(buf, sizeof(buf), "%d", g_active);
-    memory_add(m, SWI_KIND_ACTIVE, buf, (int64_t)strlen(buf), 0, 0);
-    snprintf(buf, sizeof(buf), "%d,%d,%d",
-             g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
-    memory_add(m, SWI_KIND_LAYOUT, buf, (int64_t)strlen(buf), 0, 0);
-    {
-        char *fmdir = fileman_cwd(g_fileman);
-        memory_set_last_dir(m, fmdir, (int64_t)strlen(fmdir));
-    }
-    memory_save(m, SWI_SESSION_PATH);
-    memory_destroy(m);
-}
 
-static void session_load_all(void)
-{
-    void *m = memory_new();
-    char *dir;
-    int64_t dlen = 0;
-    int i;
 
-    if (m == NULL) return;
-    memory_load(m, SWI_SESSION_PATH);
 
-    for (i = 0; i < 256; i++) {
-        char *p = NULL;
-        int64_t cur = 0, top = 0;
-        int32_t kind = 0;
-        if (memory_get(m, i, &p, &cur, &top, &kind) != 1) break;
-        if (p == NULL) continue;
-        if (kind == SWI_KIND_EDITOR && g_ntabs < MAX_TABS) {
-            tab_new(p[0] ? p : NULL);
-            if (g_ntabs > 0) {
-                win_editor_set_cursor(g_tabs[g_ntabs - 1], cur, 0);
-                g_tab_focus[g_ntabs - 1] = (int)top;
-            }
-        } else if (kind == SWI_KIND_ACTIVE) {
-            int a = atoi(p);
-            if (a >= 0 && a < g_ntabs) g_active = a;
-        } else if (kind == SWI_KIND_LAYOUT) {
-            int ch = 3, tc = 0, fw = 0;
-            if (sscanf(p, "%d,%d,%d", &ch, &tc, &fw) == 3) {
-                g_ui.console_h = ch;
-                g_ui.tabs_col = tc;
-                g_ui.fileman_w = fw;
-            }
-        }
-    }
-    dir = memory_last_dir(m, &dlen);
-    if (dir != NULL && dlen > 0) {
-        if (wd_apply(dir, 1) != 1) {
-            /* directorio de la sesión ya no existe: volver al de lanzamiento */
-            fileman_set_cwd(g_fileman, ".");
-            fileman_load(g_fileman);
-        }
-    }
-    /* Siempre arrancar en el buffer: si la sesion anterior terminó con
-     * consola o file manager abiertos, las flechas irian a ese panel y
-     * pareceria que el editor no responde. */
-    g_focus = 0;
-    for (int i = 0; i < MAX_TABS; i++) g_tab_focus[i] = 0;
-    fileman_load(g_fileman);
-    memory_destroy(m);
-}
-
-static void toggle_console(void)
-{
-    if (g_ui.console_h > 0) set_focus(0);
-    ui_sync(FUI_CONSOLE, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
-    if (g_ui.console_h > 0) set_focus(1);
-}
-
-static void toggle_fileman(void)
-{
-    if (g_ui.fileman_w > 0) set_focus(0);
-    ui_sync(FUI_FILEMAN, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
-    if (g_ui.fileman_w > 0) { fileman_load(g_fileman); set_focus(2); }
-}
-
-static void toggle_tabs(void)
-{
-    ui_sync(FUI_TABS, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
-}
 
 /* Pide al driver Fexl los spans de sintaxis del buffer activo y los aplica.
  * El texto viaja por archivo: ui.fxl lo lee con fgetc y corre regex.spans. */
-static void fmt_send(void *ed)
-{
-    UiFrame f;
-    FILE *fp;
-    char buf[4096];
-    void *doc = win_editor_doc(ed);
-    int64_t len, off, got, i;
-
-    if (!fexl_ui_alive()) return;
-
-    fp = fopen(SWI_FMT_FILE, "wb");
-    if (fp == NULL) return;
-    len = doc_length(doc);
-    for (off = 0; off < len; off += got) {
-        got = doc_read(doc, off, (int64_t)sizeof(buf), buf);
-        if (got <= 0) break;
-        fwrite(buf, 1, (size_t)got, fp);
-    }
-    fclose(fp);
-
-    memset(&f, 0, sizeof(f));
-    fexl_ui_event(FUI_FMT, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w, &f);
-
-    /* set_highlight limpia y agrega los spans de busqueda; los de sintaxis
-     * se agregan DESPUES para que no sean borrados. */
-    if (g_last_pattern[0] != '\0')
-        win_editor_set_highlight(ed, g_last_pattern,
-                                 (int64_t)strlen(g_last_pattern));
-    else
-        win_editor_clear_spans(ed);
-    for (i = 0; i < f.nspan && i < FUI_MAX_SPANS; i++)
-        fmt_add_span(win_editor_fmt(ed), f.span[i].start,
-                     f.span[i].len, f.span[i].style);
-}
 
 /* Cambia el working directory del proceso. path==NULL significa "usar el
  * directorio que muestra el file manager" (:swd sin argumento). Toda la
  * validacion, el chdir y el refresh del listado viven en fileman.ll. */
-static int wd_apply(const char *path, int quiet)
-{
-    char msg[MAX_CWD + 32];
-    const char *target = path ? path : fileman_cwd(g_fileman);
-
-    if (target[0] == '\0' || fileman_chdir(g_fileman, target) != 1) {
-        if (!quiet) {
-            snprintf(msg, sizeof(msg), "no puedo entrar a %s", target);
-            log_add(msg);
-        }
-        return 0;
-    }
-    if (!quiet) {
-        snprintf(msg, sizeof(msg), "wd: %s", fileman_cwd(g_fileman));
-        log_add(msg);
-    }
-    return 1;
-}
 
 /* Entradas de console.ll (no static: el IR las declara con declare). */
 int swi_set_wd(const char *path)
 {
-    return wd_apply(path, 0);
+    return shell_wd_apply(path, 0);
 }
 
 int swi_print_wd(void)
@@ -299,49 +117,11 @@ int swi_print_wd(void)
     char msg[sizeof(abs) + 8];
     if (getcwd(abs, sizeof(abs)) == NULL) return 0;
     snprintf(msg, sizeof(msg), "wd: %s", abs);
-    log_add(msg);
+    shell_log_add(msg);
     return 1;
 }
 
-static void tab_new(const char *path)
-{
-    void *ed;
-    char untitled[128];
-    static int counter = 0;
 
-    if (g_ntabs >= MAX_TABS) return;
-    if (path == NULL) {
-        /* ruta unica por proceso/tab: nunca truncamos el /tmp compartido
-         * al crear un buffer nuevo (antes dos swi se pisaban el archivo). */
-        snprintf(untitled, sizeof(untitled), "/tmp/swi_untitled_%d_%d.txt",
-                 (int)getpid(), counter++);
-        ed = win_editor_new_empty(untitled);
-    } else {
-        ed = win_editor_new(path);
-    }
-    if (ed == NULL) return;
-    g_tabs[g_ntabs] = ed;
-    g_tab_focus[g_ntabs] = 0;
-    g_ntabs++;
-    g_active = g_ntabs - 1;
-    g_focus = 0;
-    ui_sync(FUI_TABCHG, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
-}
-
-static void tab_close(void)
-{
-    int i;
-    if (g_ntabs <= 1) return;
-    win_editor_destroy(g_tabs[g_active]);
-    for (i = g_active; i < g_ntabs - 1; i++) {
-        g_tabs[i] = g_tabs[i + 1];
-        g_tab_focus[i] = g_tab_focus[i + 1];
-    }
-    g_ntabs--;
-    if (g_active >= g_ntabs) g_active = g_ntabs - 1;
-    g_focus = g_tab_focus[g_active];
-    ui_sync(FUI_TABCHG, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
-}
 
 static void fileman_open(int new_tab)
 {
@@ -362,15 +142,15 @@ static void fileman_open(int new_tab)
         fileman_load(g_fileman);
     } else {
         snprintf(buf, sizeof(buf), "open %s", full);
-        log_add(buf);
-        if (new_tab) tab_new(full);
+        shell_log_add(buf);
+        if (new_tab) shell_tab_new(full);
         else {
             if (win_editor_open(g_tabs[g_active], full) == 0) {
                 snprintf(buf, sizeof(buf), "no puedo abrir %s", full);
-                log_add(buf);
+                shell_log_add(buf);
             }
         }
-        set_focus(0);
+        shell_set_focus(0);
     }
     free(full);
 }
@@ -459,7 +239,7 @@ static int dispatch(void *st, void *console, void *ed, SwiAction *a)
     switch (a->kind) {
     case SWI_A_MODE:
         if (a->a == 3) console_reset(console, (int32_t)a->b);
-        ui_sync(FUI_MODE, state_mode(st), 0, 0);
+        shell_ui_sync(FUI_MODE, state_mode(st), 0, 0);
         break;
     case SWI_A_CMDLINE:
         console_push(console, a->a);
@@ -477,9 +257,9 @@ static int dispatch(void *st, void *console, void *ed, SwiAction *a)
             const char *o = swi_eval_output();
             strncpy(g_eval_msg, o ? o : "", sizeof(g_eval_msg) - 1);
             g_eval_msg[sizeof(g_eval_msg) - 1] = '\0';
-            if (o && o[0]) log_add(o);
+            if (o && o[0]) shell_log_add(o);
         }
-        ui_sync(FUI_COMMAND, 0, 0, 0);
+        shell_ui_sync(FUI_COMMAND, 0, 0, 0);
         console_reset(console, 0);
         break;
     }
@@ -497,7 +277,7 @@ static int dispatch(void *st, void *console, void *ed, SwiAction *a)
         win_editor_set_highlight(ed, g_last_pattern,
                                  (int64_t)strlen(g_last_pattern));
     }
-    if (flags & 1) fmt_send(ed);   /* recalcular spans de sintaxis desde Fexl */
+    if (flags & 1) shell_fmt_send(ed);   /* recalcular spans de sintaxis desde Fexl */
     return flags & 2;
 }
 
@@ -585,6 +365,7 @@ static int selftest(void)
     int64_t len;
 
     if (f == NULL) return 1;
+    swi_eval_set_bin(SWI_FEXL_BIN);
     fwrite("hola\nmundo\n", 1, 11, f);
     fclose(f);
     g_fileman = fileman_new();
@@ -600,10 +381,10 @@ static int selftest(void)
     memset(&g_ui, 0, sizeof(g_ui));
     g_ui.console_h = 3;
     if (fexl_ui_start(SWI_FEXL_BIN, SWI_UI_SCRIPT)) {
-        ui_sync(FUI_INIT, 3, 0, 0);
+        shell_ui_sync(FUI_INIT, 3, 0, 0);
         SELF_CHECK(g_ui.nbind > 0 && strcmp(g_ui.bind[0].act, "console.toggle") == 0,
                    "driver Fexl responde con BIND desde ui.fxl");
-        ui_sync(FUI_CONSOLE, 3, 0, 0);
+        shell_ui_sync(FUI_CONSOLE, 3, 0, 0);
         SELF_CHECK(g_ui.console_h == 10, "driver aplica toggle de consola");
         fexl_ui_stop();
     } else {
@@ -674,7 +455,7 @@ int main(int argc, char **argv)
     if (!fexl_ui_start(SWI_FEXL_BIN, SWI_UI_SCRIPT))
         fprintf(stderr, "swi: driver Fexl no disponible; layout por defecto\n");
     else
-        ui_sync(FUI_INIT, 3, 0, 0);
+        shell_ui_sync(FUI_INIT, 3, 0, 0);
     {
         struct stat sb;
         if (stat(SWI_UI_SCRIPT, &sb) == 0) {
@@ -682,6 +463,7 @@ int main(int argc, char **argv)
             g_script_mtime_ns = sb.st_mtim.tv_nsec;
         }
     }
+    swi_eval_set_bin(SWI_FEXL_BIN);
     swi_eval_reset();     /* session Fexl de consola nueva por proceso */
 
     g_fileman = fileman_new();
@@ -692,17 +474,17 @@ int main(int argc, char **argv)
     void *console = console_new();
     if (!st || !canvas || !console) return 1;
     if (filename == NULL) {
-        session_load_all();          /* restaura tabs, cursor, foco, layout, cwd */
-        if (g_ntabs == 0) tab_new(NULL);
+        shell_session_load();          /* restaura tabs, cursor, foco, layout, cwd */
+        if (g_ntabs == 0) shell_tab_new(NULL);
     } else {
-        tab_new(filename);
+        shell_tab_new(filename);
     }
     void *ed = g_tabs[g_active];
     canvas_set_size(canvas, tb_width(), tb_height());
     void *win = canvas_open(canvas, 0, ed);
     console_set_eval(console, swi_eval);
     if (win == NULL) return 1;
-    fmt_send(ed);     /* resaltado inicial del archivo abierto */
+    shell_fmt_send(ed);     /* resaltado inicial del archivo abierto */
 
     while (!quit && win_editor_quit(ed) == 0) {
         InEvent ev;
@@ -722,8 +504,8 @@ int main(int argc, char **argv)
             if (changed) {
                 fexl_ui_stop();
                 if (fexl_ui_start(SWI_FEXL_BIN, SWI_UI_SCRIPT)) {
-                    ui_sync(FUI_INIT, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
-                    log_add("ui.fxl recargado");
+                    shell_ui_sync(FUI_INIT, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
+                    shell_log_add("ui.fxl recargado");
                 }
             }
         }
@@ -735,7 +517,7 @@ int main(int argc, char **argv)
         if (ev.type == IN_EV_RESIZE) {
             canvas_set_size(canvas, ev.w, ev.h);
             canvas_maximize(canvas, win);
-            ui_sync(FUI_MODE, state_mode(st), 0, 0);
+            shell_ui_sync(FUI_MODE, state_mode(st), 0, 0);
             continue;
         }
         if (ev.type != IN_EV_KEY && ev.type != IN_EV_CHAR) continue;
@@ -758,18 +540,18 @@ int main(int argc, char **argv)
                 quit = 1;
                 continue;
             }
-            if (console_key && has_bind("console.toggle")) { toggle_console(); continue; }
-            if (fileman_key && has_bind("fileman.toggle")) { toggle_fileman(); continue; }
-            if (tabs_key && has_bind("tabs.collapse")) { toggle_tabs(); continue; }
-            if (ctrl && ch == 't' && has_bind("tab.new")) { tab_new(NULL); continue; }
-            if (ctrl && ch == 'w' && has_bind("tab.close")) {
-                tab_close(); ed = g_tabs[g_active]; continue;
+            if (console_key && shell_has_bind("console.toggle")) { shell_toggle_console(); continue; }
+            if (fileman_key && shell_has_bind("fileman.toggle")) { shell_toggle_fileman(); continue; }
+            if (tabs_key && shell_has_bind("tabs.collapse")) { shell_toggle_tabs(); continue; }
+            if (ctrl && ch == 't' && shell_has_bind("tab.new")) { shell_tab_new(NULL); continue; }
+            if (ctrl && ch == 'w' && shell_has_bind("tab.close")) {
+                shell_tab_close(); ed = g_tabs[g_active]; continue;
             }
-            if (ctrl && ch == 'n' && has_bind("tab.next")) {
+            if (ctrl && ch == 'n' && shell_has_bind("tab.next")) {
                 g_active = (g_active + 1) % g_ntabs;
-                set_focus(g_tab_focus[g_active]);
+                shell_set_focus(g_tab_focus[g_active]);
                 ed = g_tabs[g_active];
-                ui_sync(FUI_TABCHG, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
+                shell_ui_sync(FUI_TABCHG, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
                 continue;
             }
         }
@@ -782,14 +564,14 @@ int main(int argc, char **argv)
                 g_cmd_len--;
             else if (ev.type == IN_EV_KEY && ev.key == IN_KEY_ENTER) {
                 g_cmd[g_cmd_len] = '\0';
-                log_add(g_cmd);
+                shell_log_add(g_cmd);
                 /* el evento pasa por el driver: Fexl decide STATUS/LOG */
-                ui_sync(FUI_EVAL, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
+                shell_ui_sync(FUI_EVAL, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
                 if (swi_eval(g_cmd, g_cmd_len) && swi_eval_output()[0])
-                    log_add(swi_eval_output());
+                    shell_log_add(swi_eval_output());
                 g_cmd_len = 0; g_cmd[0] = '\0';
             } else if (ev.type == IN_EV_KEY && ev.key == IN_KEY_ESC) {
-                set_focus(0); g_cmd_len = 0; g_cmd[0] = '\0';
+                shell_set_focus(0); g_cmd_len = 0; g_cmd[0] = '\0';
             }
             continue;
         }
@@ -825,7 +607,7 @@ int main(int argc, char **argv)
                        (ev.type == IN_EV_CHAR && ev.ch == 'h')) {
                 fileman_parent(g_fileman);
             } else if (ev.type == IN_EV_KEY && ev.key == IN_KEY_ESC) {
-                set_focus(0);
+                shell_set_focus(0);
             }
             continue;
         }
@@ -839,8 +621,8 @@ int main(int argc, char **argv)
     }
 
     /* sesion: C es el unico dueno; se graba antes de destruir los editors */
-    session_save_all();
-    ui_sync(FUI_QUIT, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
+    shell_session_save();
+    shell_ui_sync(FUI_QUIT, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
     fexl_ui_stop();
     console_destroy(console);
     canvas_destroy(canvas);

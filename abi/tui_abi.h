@@ -135,6 +135,21 @@ extern int32_t  fileman_is_dir(void *fm, const char *name);
 extern void     fileman_draw(void *fm, int32_t x, int32_t y,
                              int32_t w, int32_t h);
 
+/* --- shell.ll: chrome y estado compartidos con main.c --- */
+extern void    shell_log_add(const char *s);
+extern void    shell_set_focus(int32_t f);
+extern int32_t shell_has_bind(const char *act);
+extern void    shell_ui_sync(int32_t ev, int32_t a, int32_t b, int32_t c);
+extern void    shell_tab_new(const char *path);
+extern void    shell_tab_close(void);
+extern void    shell_session_save(void);
+extern void    shell_session_load(void);
+extern int32_t shell_wd_apply(const char *path, int32_t quiet);
+extern void    shell_fmt_send(void *ed);
+extern void    shell_toggle_console(void);
+extern void    shell_toggle_fileman(void);
+extern void    shell_toggle_tabs(void);
+
 /* --- console.ll --- */
 extern void    *console_new(void);
 extern void     console_destroy(void *c);

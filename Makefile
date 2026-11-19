@@ -165,9 +165,6 @@ $(BUILD)/out.o: tui/out.c tui/out.h tui/termbox2.h | $(BUILD)
 $(BUILD)/main.o: tui/main.c tui/in.h tui/out.h tui/eval.h tui/fexl_ui.h tui/termbox2.h abi/tui_abi.h | $(BUILD)
 	$(CLANG) $(CFLAGS) $(EVAL_DEF) $(UI_SCRIPT_DEF) -I. -c $< -o $@
 
-$(BUILD)/eval.o: tui/eval.c tui/eval.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $(EVAL_DEF) -I. -c $< -o $@
-
 $(BUILD)/in.bc: tui/in.c tui/in.h | $(BUILD)
 	$(CLANG) $(CBCFLAGS) -I. -c $< -o $@
 
@@ -176,9 +173,6 @@ $(BUILD)/out.bc: tui/out.c tui/out.h tui/termbox2.h | $(BUILD)
 
 $(BUILD)/main.bc: tui/main.c tui/in.h tui/out.h tui/eval.h tui/fexl_ui.h tui/termbox2.h abi/tui_abi.h | $(BUILD)
 	$(CLANG) $(CBCFLAGS) $(EVAL_DEF) $(UI_SCRIPT_DEF) -I. -c $< -o $@
-
-$(BUILD)/eval.bc: tui/eval.c tui/eval.h | $(BUILD)
-	$(CLANG) $(CBCFLAGS) $(EVAL_DEF) -I. -c $< -o $@
 
 # --- IR: un modulo por objeto / bitcode ---
 # Los modulos de regex/ reciben RX_TYPES concatenado (LLVM IR no tiene include),
@@ -196,12 +190,12 @@ $(BUILD)/%.o: %.ll | $(BUILD)
 $(BUILD)/%.bc: %.ll | $(BUILD)
 	$(OPT) $(OPT_TRIPLE) $(OPT_PASS) $< -o $@
 
-TUI_LL := state window canvas win_editor console memory fileman fexl_ui
+TUI_LL := state window canvas win_editor console memory fileman fexl_ui eval shell
 ENGINE_LL := fsio_posix fsio_ensure_dir fsio_list_dir fsio_actions fsio_getdents \
              textbuffer lineindex document history find chunk \
              replace regex_parser regex_compiler regex_thread regex_runner format
 ALL_LL := $(TUI_LL) $(ENGINE_LL)
-ALL_C  := main in out eval
+ALL_C  := main in out
 
 LL_OBJ := $(addprefix $(BUILD)/,$(addsuffix .o,$(ALL_LL)))
 C_OBJ  := $(addprefix $(BUILD)/,$(addsuffix .o,$(ALL_C)))
@@ -250,7 +244,9 @@ $(BUILD)/test_canvas: $(BUILD)/test_canvas.o $(BUILD)/canvas.o $(BUILD)/window.o
 
 $(BUILD)/test_win_editor.o: test/test_win_editor.c tui/in.h | $(BUILD)
 	$(CLANG) $(CFLAGS) -I. -c $< -o $@
-$(BUILD)/test_win_editor: $(BUILD)/test_win_editor.o $(BUILD)/win_editor.o $(LL_OBJ)
+$(BUILD)/shell_globals.o: test/shell_globals.c abi/tui_abi.h | $(BUILD)
+	$(CLANG) $(CFLAGS) -I. -c $< -o $@
+$(BUILD)/test_win_editor: $(BUILD)/test_win_editor.o $(BUILD)/shell_globals.o $(BUILD)/win_editor.o $(LL_OBJ)
 	$(CLANG) $(TEST_LDFLAGS) $^ -o $@
 
 $(BUILD)/test_console.o: test/test_console.c tui/in.h | $(BUILD)

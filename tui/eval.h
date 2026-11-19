@@ -15,6 +15,9 @@
 
 #include <stdint.h>
 
+/* Fija la ruta absoluta al binario (llamado al arrancar desde main.c). */
+void swi_eval_set_bin(const char *bin);
+
 /* Firma del callback que registra console_set_eval(). */
 int swi_eval(const char *line, int64_t len);
 

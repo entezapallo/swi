@@ -42,6 +42,8 @@ IR con su test.
 | `tui/state.ll` | Modo activo, `state_step()`, tabla tecla+modo → `SwiAction`. |
 | `tui/win_editor.ll` | Dibujo del buffer, cursor, gutter, movimientos y resaltado. Lee el texto con `doc_read()`. |
 | `tui/console.ll` | Línea de comandos y builtins (`:w`, `:e`, …). |
+| `tui/eval.ll` | Puente batch a Fexl: sesión por PID y `fork/exec`. |
+| `tui/shell.ll` | Log, foco, BIND, tabs, sesión, `:swd`, `fmt_send` y toggles (migrados de `main.c`). |
 | `tui/canvas.ll` | `canvas_layout_panels()`: geometría de tabs/buffer/consola/file manager. |
 | `tui/fileman.ll` | Dueño del cwd, listado, selección y scroll del file manager. |
 | `tui/memory.ll` | Sesión: tabs, cursor, foco, layout, `last_dir`. |

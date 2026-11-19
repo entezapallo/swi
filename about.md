@@ -23,7 +23,7 @@ quoted), así que la consola no podía correr dentro del driver. La solución fu
 
 - `ui.fxl` recibe `FUI_EVAL` y decide el `STATUS`/`LOG`.
 - El intérprete real corre en un hijo `fexlswi0`, invocado con `fork/exec`.
-- `eval.c` acumula las líneas de la consola en un script de sesión por PID y
+- `eval.ll` acumula las líneas de la consola en un script de sesión por PID y
   re-evalúa el script completo, así que las definiciones sobreviven.
 
 El binario `fexlswi0` es **musl dinámico**, como `swi`: `swi` lo usa como
