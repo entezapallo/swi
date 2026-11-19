@@ -10,6 +10,7 @@ declare i32 @close(i32)
 declare i64 @lseek(i32, i64, i32)
 declare ptr @mmap(ptr, i64, i32, i32, i32, i64)
 declare i32 @munmap(ptr, i64)
+declare i32 @chdir(ptr)
 declare ptr @malloc(i64)
 declare void @free(ptr)
 
@@ -161,6 +162,19 @@ skip:
 ; (evita fstat y su struct stat con layout complejo en IR). El fd se cierra
 ; despues del mmap: el mapping sobrevive al cierre (contraintuitivo pero POSIX).
 ; ---------------------------------------------------------------------------
+; ---------------------------------------------------------------------------
+; fsio_chdir: cambia el working directory del proceso. El llamador (main.c)
+; decide cuándo; el hijo Fexl lo hereda porque se lanza con fork/exec.
+; Devuelve 1 si chdir(2) salió bien, 0 si no.
+; ---------------------------------------------------------------------------
+define i32 @fsio_chdir(ptr %path) {
+entry:
+  %rc = call i32 @chdir(ptr %path)
+  %ok = icmp eq i32 %rc, 0
+  %r = zext i1 %ok to i32
+  ret i32 %r
+}
+
 ; ---------------------------------------------------------------------------
 ; fsio_open_append / write_fd / close_fd: escritura por chunks, sin
 ; materializar el documento entero. O_WRONLY|O_APPEND = 1|1024 = 1025.

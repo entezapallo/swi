@@ -14,6 +14,8 @@ static char last_pat[128];
 static int last_forward;
 static int n_eval;
 static char last_eval[128];
+static int n_setwd, n_printwd;
+static char last_wd[128];
 
 /* stub del intérprete externo (callback registrado con console_set_eval) */
 static int eval_stub(const char *line, int64_t len)
@@ -40,6 +42,18 @@ int win_editor_open(void *ed, const char *path)
     (void)ed; (void)path; return 1;
 }
 const char *win_editor_path(void *ed) { (void)ed; return "/tmp/stub.txt"; }
+int swi_set_wd(const char *path)
+{
+    n_setwd++;
+    if (path == NULL)
+        strcpy(last_wd, "<fm>");
+    else {
+        strncpy(last_wd, path, sizeof(last_wd) - 1);
+        last_wd[sizeof(last_wd) - 1] = '\0';
+    }
+    return 1;
+}
+int swi_print_wd(void) { n_printwd++; return 1; }
 int win_editor_search(void *ed, const char *pat, int64_t len, int32_t fwd)
 {
     (void)ed;
@@ -140,6 +154,28 @@ int main(void)
     type_str(c, "q!");
     CHECK(console_execute(c, fake_ed) == 1 && n_quit == 3,
           ":q! sale sin guardar");
+
+    printf("=== console.ll: directorio (:swd / :pwd) ===\n");
+    console_reset(c, ':');
+    type_str(c, "swd");
+    CHECK(console_execute(c, fake_ed) == 1 && n_setwd == 1 &&
+          strcmp(last_wd, "<fm>") == 0,
+          ":swd sin ruta usa el directorio del file manager");
+    console_reset(c, ':');
+    type_str(c, "swd /tmp");
+    CHECK(console_execute(c, fake_ed) == 1 && n_setwd == 2 &&
+          strcmp(last_wd, "/tmp") == 0,
+          ":swd /tmp setea la ruta absoluta");
+    console_reset(c, ':');
+    type_str(c, "swd ..");
+    CHECK(console_execute(c, fake_ed) == 1 && n_setwd == 3 &&
+          strcmp(last_wd, "..") == 0,
+          ":swd .. sube un nivel");
+    console_reset(c, ':');
+    type_str(c, "pwd");
+    CHECK(console_execute(c, fake_ed) == 1 && n_printwd == 1,
+          ":pwd muestra el directorio sin delegar a Fexl");
+    CHECK(n_eval == 1, "los builtins de directorio no caen en el eval");
 
     console_destroy(c);
     printf("=== resumen ===\n");

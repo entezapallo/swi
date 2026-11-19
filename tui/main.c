@@ -45,6 +45,7 @@
 #define SWI_FMT_FILE "/tmp/swi_fmt_input.txt"
 
 extern int32_t fsio_ensure_dir(const char *path);
+extern int32_t fsio_chdir(const char *path);
 extern int32_t fsio_list_dir(const char *path, char ***out_names, int64_t *out_count);
 extern void fsio_free_dir_list(char **names, int64_t count);
 extern char *fsio_path_join(const char *dir, const char *name);
@@ -76,6 +77,7 @@ static int g_focus = 0;   /* 0=buffer, 1=consola, 2=file manager */
 
 static void tab_new(const char *path);
 static void fileman_load(void);
+static int  wd_apply(const char *path, int quiet);
 
 static void usage(const char *prog)
 {
@@ -191,8 +193,12 @@ static void session_load_all(void)
     }
     dir = memory_last_dir(m, &dlen);
     if (dir != NULL && dlen > 0) {
-        strncpy(g_fm_cwd, dir, sizeof(g_fm_cwd) - 1);
-        g_fm_cwd[sizeof(g_fm_cwd) - 1] = '\0';
+        if (wd_apply(dir, 1) != 1) {
+            /* directorio de la sesión ya no existe: volver al de lanzamiento */
+            strncpy(g_fm_cwd, ".", sizeof(g_fm_cwd) - 1);
+            g_fm_cwd[sizeof(g_fm_cwd) - 1] = '\0';
+            fileman_load();
+        }
     }
     /* Siempre arrancar en el buffer: si la sesion anterior terminó con
      * consola o file manager abiertos, las flechas irian a ese panel y
@@ -283,6 +289,60 @@ static void fileman_load(void)
     g_fm_n = count;
     if (g_fm_sel >= g_fm_n) g_fm_sel = g_fm_n > 0 ? g_fm_n - 1 : 0;
     if (g_fm_sel < 0) g_fm_sel = 0;
+}
+
+/* Cambia el working directory del proceso. path==NULL significa "usar el
+ * directorio que muestra el file manager" (:swd sin argumento). Mantiene
+ * g_fm_cwd sincronizado y absoluto, y refresca el listado. */
+static int wd_apply(const char *path, int quiet)
+{
+    struct stat st;
+    char abs[MAX_CWD];
+    char msg[sizeof(abs) + 32];
+    const char *target = path ? path : g_fm_cwd;
+
+    if (target[0] == '\0' || stat(target, &st) != 0 || !S_ISDIR(st.st_mode))
+        goto fail;
+    if (fsio_chdir(target) != 1)
+        goto fail;
+
+    if (getcwd(abs, sizeof(abs)) != NULL) {
+        strncpy(g_fm_cwd, abs, sizeof(g_fm_cwd) - 1);
+        g_fm_cwd[sizeof(g_fm_cwd) - 1] = '\0';
+    } else {
+        strncpy(g_fm_cwd, target, sizeof(g_fm_cwd) - 1);
+        g_fm_cwd[sizeof(g_fm_cwd) - 1] = '\0';
+    }
+    g_fm_sel = 0;
+    fileman_load();
+    if (!quiet) {
+        snprintf(msg, sizeof(msg), "wd: %s", g_fm_cwd);
+        log_add(msg);
+    }
+    return 1;
+
+fail:
+    if (!quiet) {
+        snprintf(msg, sizeof(msg), "no puedo entrar a %s", target);
+        log_add(msg);
+    }
+    return 0;
+}
+
+/* Entradas de console.ll (no static: el IR las declara con declare). */
+int swi_set_wd(const char *path)
+{
+    return wd_apply(path, 0);
+}
+
+int swi_print_wd(void)
+{
+    char abs[MAX_CWD];
+    char msg[sizeof(abs) + 8];
+    if (getcwd(abs, sizeof(abs)) == NULL) return 0;
+    snprintf(msg, sizeof(msg), "wd: %s", abs);
+    log_add(msg);
+    return 1;
 }
 
 static void tab_new(const char *path)

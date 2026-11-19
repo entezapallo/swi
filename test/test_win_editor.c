@@ -15,6 +15,10 @@ int out_cell(int32_t x, int32_t y, int32_t ch,
     return 0;
 }
 
+/* console.ll los declara; main.c los define en el binario real. */
+int swi_set_wd(const char *path) { (void)path; return 1; }
+int swi_print_wd(void) { return 1; }
+
 static int g_pass = 0;
 static int g_fail = 0;
 

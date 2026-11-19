@@ -107,7 +107,11 @@ Cada línea se agrega a un **script de sesión por PID**
 (`/tmp/swi_fexl_session_<pid>.fxl`) y se re-evalúa el script **completo**, así
 que las definiciones (`\x=...`) sobreviven entre comandos. La salida se captura
 en `/tmp/swi_eval_<pid>.out` y se muestra en el log. El intérprete se lanza con
-`fork/exec` directo (sin shell).
+`fork/exec` directo (sin shell). Como el hijo hereda el cwd, el comando
+`:swd` (builtin de la consola) cambia el wd del proceso y, con él, el de todos
+los scripts Fexl que corren después. `:swd` sin ruta toma el directorio que
+muestra el file manager; `:pwd` lo muestra sin cambiarlo. El wd se restaura de
+la sesión al arrancar.
 
 `Esc` devuelve el foco al buffer. `Backspace` borra.
 

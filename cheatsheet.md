@@ -30,6 +30,9 @@ En INSERT, `h/j/k/l` son **texto**; las flechas son movimientos.
 | `:w` | guardar |
 | `:w <ruta>` | guardar como |
 | `:e` / `:e <ruta>` | recargar / abrir |
+| `:swd` | setear el directorio de trabajo al del file manager |
+| `:swd <ruta>` | setear el directorio de trabajo (relativa contra el wd actual) |
+| `:pwd` | mostrar el directorio de trabajo actual |
 | `:q` / `:q!` / `:wq` | salir / salir sin guardar / guardar y salir |
 
 ## Paneles
@@ -45,7 +48,9 @@ En INSERT, `h/j/k/l` son **texto**; las flechas son movimientos.
 | `Ctrl+Q` / `F10` | salir (desde cualquier foco) |
 
 En el file manager: `j/k` o flechas, `Enter` abre, `h`/`Backspace` sube,
-`t` abre en tab nueva, `..` es la primera entrada.
+`t` abre en tab nueva, `..` es la primera entrada. **Navegar no cambia el wd
+del proceso**: para eso usá `:swd` (sin ruta toma el directorio que estás
+viendo). El wd se restaura de la sesión al arrancar.
 
 `F2`/`F3`/`F4` son equivalentes a `Ctrl+E/F/B`, pero puede capturarlos el
 gestor de escritorio (F3 abre el launcher en XFCE).

@@ -96,6 +96,10 @@ extern int32_t  console_prefix(void *c);
 extern int32_t  console_execute(void *c, void *ed);
 extern int32_t  console_repeat(void *c, void *ed, int32_t forward);
 
+/* builtins de directorio (definidos en main.c, declarados por console.ll) */
+extern int32_t  swi_set_wd(const char *path);  /* NULL = usar g_fm_cwd */
+extern int32_t  swi_print_wd(void);
+
 /* --- memory.ll (sesion: ventanas, macros, last_dir) --- */
 extern void    *memory_new(void);
 extern void     memory_destroy(void *m);

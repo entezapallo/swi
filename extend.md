@@ -169,9 +169,18 @@ Los builtins viven en `console_execute()` (`tui/console.ll`). Hoy el chain es:
 :w → do_save → win_editor_save
 :q → do_quit → win_editor_request_quit
 :q! / :wq / :w <ruta> / :e <ruta>
+:swd / :swd <ruta> → swi_set_wd      (directorio del file manager o ruta)
+:pwd               → swi_print_wd    (solo muestra, no cambia)
 /… → win_editor_search
 otro → callback eval (Fexl) en el bloque `unknown`
 ```
+
+`:swd` es un ejemplo real del patrón de abajo: `swi_set_wd()` está en
+`tui/main.c` (no `static`, porque `console.ll` lo declara con `declare`) y
+usa `fsio_chdir()` de `fsio/fsio_posix.ll`. Con `path == NULL` toma
+`g_fm_cwd`; si no, usa la ruta dada. Normaliza con `getcwd()`, refresca el
+file manager y loggea `wd: <abs>`. `session_load_all()` lo llama en modo
+silencioso para restaurar el wd guardado en la sesión.
 
 ### 5.1 Pasos
 

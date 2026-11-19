@@ -26,12 +26,16 @@ declare i32 @win_editor_open(ptr, ptr)
 declare ptr @win_editor_path(ptr)
 declare void @win_editor_request_quit(ptr)
 declare i32 @win_editor_search(ptr, ptr, i64, i32)
+declare i32 @swi_set_wd(ptr)
+declare i32 @swi_print_wd()
 
-@CMD_W  = private constant [2 x i8] c"w\00"
-@CMD_Q  = private constant [2 x i8] c"q\00"
-@CMD_QB = private constant [3 x i8] c"q!\00"
-@CMD_WQ = private constant [3 x i8] c"wq\00"
-@CMD_E  = private constant [2 x i8] c"e\00"
+@CMD_W   = private constant [2 x i8] c"w\00"
+@CMD_Q   = private constant [2 x i8] c"q\00"
+@CMD_QB  = private constant [3 x i8] c"q!\00"
+@CMD_WQ  = private constant [3 x i8] c"wq\00"
+@CMD_E   = private constant [2 x i8] c"e\00"
+@CMD_SWD = private constant [4 x i8] c"swd\00"
+@CMD_PWD = private constant [4 x i8] c"pwd\00"
 
 define ptr @console_new() {
 entry:
@@ -233,7 +237,53 @@ open_chk:
   %b0e = icmp eq i8 %b0, 101
   %len_e = icmp sge i64 %len, 1
   %is_e = and i1 %b0e, %len_e
-  br i1 %is_e, label %do_open, label %unknown
+  br i1 %is_e, label %do_open, label %swd_chk
+
+swd_chk:
+  ; ":swd" sin argumento -> usar el directorio del file manager.
+  %wd_rswd = call i32 @strcmp(ptr %buf, ptr @CMD_SWD)
+  %wd_isswd = icmp eq i32 %wd_rswd, 0
+  br i1 %wd_isswd, label %do_swd, label %swd_arg_chk
+
+swd_arg_chk:
+  ; ":swd <ruta>" -> substring desde buf+4 (rutas relativas se resuelven
+  ; contra el wd actual, igual que cd).
+  %wd_s0 = load i8, ptr %buf
+  %wd_c0 = icmp eq i8 %wd_s0, 115
+  %wd_s1p = getelementptr i8, ptr %buf, i64 1
+  %wd_s1 = load i8, ptr %wd_s1p
+  %wd_c1 = icmp eq i8 %wd_s1, 119
+  %wd_s2p = getelementptr i8, ptr %buf, i64 2
+  %wd_s2 = load i8, ptr %wd_s2p
+  %wd_c2 = icmp eq i8 %wd_s2, 100
+  %wd_s3p = getelementptr i8, ptr %buf, i64 3
+  %wd_s3 = load i8, ptr %wd_s3p
+  %wd_c3 = icmp eq i8 %wd_s3, 32
+  %wd_p1 = and i1 %wd_c0, %wd_c1
+  %wd_p2 = and i1 %wd_p1, %wd_c2
+  %wd_p3 = and i1 %wd_p2, %wd_c3
+  %wd_len4 = icmp sge i64 %len, 4
+  %wd_isarg = and i1 %wd_p3, %wd_len4
+  br i1 %wd_isarg, label %do_swd_arg, label %pwd_chk
+
+do_swd:
+  %wd_rswd0 = call i32 @swi_set_wd(ptr null)
+  ret i32 1
+
+do_swd_arg:
+  %wd_argp = getelementptr i8, ptr %buf, i64 4
+  %wd_rswd1 = call i32 @swi_set_wd(ptr %wd_argp)
+  ret i32 1
+
+pwd_chk:
+  %wd_rpwd = call i32 @strcmp(ptr %buf, ptr @CMD_PWD)
+  %wd_ispwd = icmp eq i32 %wd_rpwd, 0
+  br i1 %wd_ispwd, label %do_pwd, label %unknown
+
+do_pwd:
+  call i32 @swi_print_wd()
+  ret i32 1
+
 do_open:
   %len_e2 = icmp sgt i64 %len, 2
   br i1 %len_e2, label %open_path, label %open_reload
