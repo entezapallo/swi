@@ -6,7 +6,8 @@
 > **Los comandos `./build` y `./fexl` de abajo son del build legacy del
 > upstream y ya no existen acá.** El build real es `make` desde esta carpeta
 > (o `make -C fexlswi <perfil>` desde `~/swi`). Los binarios quedan en
-> `bin/fexlswi` y `bin/fexlswi0`.
+> `bin/fexlswi` y `bin/fexlswi0`. La suite de tests del upstream (`src/test/`,
+> `src/out/`) y los scripts `handy`/`fexl`/`fexl0` ya no estan aca.
 
 # fexl - Function EXpression Language
 
@@ -21,17 +22,15 @@ Go into the source code directory:
 cd src
 ```
 
-Build the code and test its validity:
+Build the code:
 ```
-test/check
+make
 ```
 
-That runs the test scripts, comparing their outputs with the reference files in
-the out directory.  They should all succeed, however, if you run on a 32-bit
-system you will see some inconsequential differences in tests which measure
-memory usage or deliberately try to run out of memory.
+(El build 100% Make reemplazo los scripts `./build` del upstream; ver
+[`BUILD.md`](BUILD.md). La suite de tests original ya no se incluye.)
 
-## Installation
+# Installation
 
 There is no "installation" as such.  You just put the Fexl code anywhere you
 like, build it, and run it from there.  There is no script to copy it to /usr
@@ -73,25 +72,10 @@ To build the code and run a fexl program:
 bin/fexlswi [FILE]
 ```
 
-To build the code and check all the tests:
-```
-test/check
-```
-
-You can also check a specific set of tests, e.g.:
-```
-test/check chars b10 sat crypto
-```
-
-You can show the output of an individual test, e.g.:
-```
-test/show sat
-```
-
-To source the handy shell aliases that I use for development:
-```
-. handy
-```
+La suite original de tests del upstream (`src/test/`, `src/out/`) y los
+scripts `handy`/`fexl`/`fexl0` se quitaron: no los usa el build ni los tests
+de `swi`. La verificacion real es `make test` desde `~/swi` (183 checks) y
+`fexlswi/test/regex.fxl` como smoke test del tipo regex.
 
 To see the current version number (http://semver.org):
 ```

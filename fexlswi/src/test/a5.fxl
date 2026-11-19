@@ -1,9 +1,0 @@
-#
-define "talk" (say "TALK")
-evaluate \;
-say "begin"
-talk
-talk
-talk
-talk
-say "end"
