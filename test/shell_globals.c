@@ -22,3 +22,13 @@ int     g_fm_rows = 0;
 void   *g_fileman = NULL;
 time_t  g_script_mtime = 0;
 long    g_script_mtime_ns = 0;
+
+
+/* stubs de salida global que usa draw.ll en test_win_editor */
+int out_width(void) { return 80; }
+int out_height(void) { return 24; }
+int out_clear(void) { return 0; }
+int out_present(void) { return 0; }
+int out_cursor(int32_t x, int32_t y) { (void)x;(void)y; return 0; }
+
+int g_pass = 0, g_fail = 0;

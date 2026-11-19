@@ -44,6 +44,7 @@ IR con su test.
 | `tui/console.ll` | Línea de comandos y builtins (`:w`, `:e`, …). |
 | `tui/eval.ll` | Puente batch a Fexl: sesión por PID y `fork/exec`. |
 | `tui/shell.ll` | Log, foco, BIND, tabs, sesión, `:swd`, `fmt_send` y toggles (migrados de `main.c`). |
+| `tui/draw.ll` | Dibujo de paneles, `fileman_open` y `dispatch` (migrados de `main.c`). |
 | `tui/canvas.ll` | `canvas_layout_panels()`: geometría de tabs/buffer/consola/file manager. |
 | `tui/fileman.ll` | Dueño del cwd, listado, selección y scroll del file manager. |
 | `tui/memory.ll` | Sesión: tabs, cursor, foco, layout, `last_dir`. |

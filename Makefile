@@ -190,7 +190,7 @@ $(BUILD)/%.o: %.ll | $(BUILD)
 $(BUILD)/%.bc: %.ll | $(BUILD)
 	$(OPT) $(OPT_TRIPLE) $(OPT_PASS) $< -o $@
 
-TUI_LL := state window canvas win_editor console memory fileman fexl_ui eval shell
+TUI_LL := state window canvas win_editor console memory fileman fexl_ui eval shell draw
 ENGINE_LL := fsio_posix fsio_ensure_dir fsio_list_dir fsio_actions fsio_getdents \
              textbuffer lineindex document history find chunk \
              replace regex_parser regex_compiler regex_thread regex_runner format
@@ -269,6 +269,12 @@ $(BUILD)/test_fexl_ui.o: test/test_fexl_ui.c tui/fexl_ui.h | $(BUILD)
 $(BUILD)/test_fexl_ui: $(BUILD)/test_fexl_ui.o $(BUILD)/fexl_ui.o
 	$(CLANG) $(TEST_LDFLAGS) $^ -o $@
 
+$(BUILD)/test_integration.o: test/test_integration.c tui/in.h tui/eval.h \
+                             tui/fexl_ui.h abi/tui_abi.h | $(BUILD)
+	$(CLANG) $(CFLAGS) $(EVAL_DEF) $(UI_SCRIPT_DEF) -I. -c $< -o $@
+$(BUILD)/test_integration: $(BUILD)/test_integration.o $(BUILD)/shell_globals.o $(LL_OBJ)
+	$(CLANG) $(TEST_LDFLAGS) $^ -o $@
+
 run: $(BUILD)/swi
 	./$(BUILD)/swi
 
@@ -277,7 +283,8 @@ run-opt:
 
 test: $(BUILD)/test_state $(BUILD)/test_window $(BUILD)/test_canvas \
       $(BUILD)/test_win_editor $(BUILD)/test_console $(BUILD)/test_fileman \
-      $(BUILD)/test_memory $(BUILD)/test_fexl_ui $(BUILD)/swi
+      $(BUILD)/test_memory $(BUILD)/test_fexl_ui $(BUILD)/test_integration \
+      $(BUILD)/swi
 	./$(BUILD)/test_state
 	./$(BUILD)/test_window
 	./$(BUILD)/test_canvas
@@ -286,7 +293,7 @@ test: $(BUILD)/test_state $(BUILD)/test_window $(BUILD)/test_canvas \
 	./$(BUILD)/test_fileman
 	./$(BUILD)/test_memory
 	./$(BUILD)/test_fexl_ui
-	./$(BUILD)/swi --selftest
+	./$(BUILD)/test_integration
 
 test-opt:
 	$(MAKE) MODE=opt test

@@ -77,7 +77,7 @@ int g_focus = 0;   /* 0=buffer, 1=consola, 2=file manager */
 
 static void usage(const char *prog)
 {
-    fprintf(stderr, "uso: %s [--selftest] [archivo]\n", prog);
+    fprintf(stderr, "uso: %s [archivo]\n", prog);
     fprintf(stderr, "  F2 consola  F3 archivos  F4 tabs\n");
     fprintf(stderr, "  Ctrl+T tab nueva  Ctrl+W cerrar  Ctrl+Q salir\n");
 }
@@ -123,329 +123,30 @@ int swi_print_wd(void)
 
 
 
-static void fileman_open(int new_tab)
-{
-    char *full, *name;
-    char buf[512];
-    int64_t sel = fileman_sel(g_fileman);
-
-    if (fileman_count(g_fileman) <= 0) return;
-    name = fileman_name(g_fileman, sel);
-    if (strcmp(name, "..") == 0) {
-        fileman_parent(g_fileman);
-        return;
-    }
-    full = fsio_path_join(fileman_cwd(g_fileman), name);
-    if (full == NULL) return;
-    if (fileman_is_dir(g_fileman, name) == 1) {
-        fileman_set_cwd(g_fileman, full);
-        fileman_load(g_fileman);
-    } else {
-        snprintf(buf, sizeof(buf), "open %s", full);
-        shell_log_add(buf);
-        if (new_tab) shell_tab_new(full);
-        else {
-            if (win_editor_open(g_tabs[g_active], full) == 0) {
-                snprintf(buf, sizeof(buf), "no puedo abrir %s", full);
-                shell_log_add(buf);
-            }
-        }
-        shell_set_focus(0);
-    }
-    free(full);
-}
 
 /* --- dibujo de los paneles --- */
 
-static void draw_tabs(SwiRect r)
-{
-    int i;
-    int x = r.x + 1;
-    char buf[160];
 
-    if (r.h <= 0) return;
-    out_fill(r.x, r.y, r.w, r.h, ' ', OUT_WHITE, OUT_BLUE, OUT_ATTR_NONE);
 
-    if (g_ui.tabs_col) {
-        const char *p = win_editor_path(g_tabs[g_active]);
-        snprintf(buf, sizeof(buf), "[%d/%d] %s", g_active + 1, g_ntabs,
-                 p ? p : "untitled");
-        out_text(x, r.y, buf, OUT_BRIGHT_WHITE, OUT_BLUE, OUT_ATTR_BOLD);
-        return;
-    }
-
-    for (i = 0; i < g_ntabs && x < r.x + r.w - 4; i++) {
-        const char *p = win_editor_path(g_tabs[i]);
-        const char *name = p ? strrchr(p, '/') : NULL;
-        name = name ? name + 1 : (p ? p : "untitled");
-        snprintf(buf, sizeof(buf), "[%d]%s%s ", i + 1, name,
-                 win_editor_dirty(g_tabs[i]) ? "+" : "");
-        if ((int)strlen(buf) > r.x + r.w - x) break;
-        out_text(x, r.y, buf,
-                 i == g_active ? OUT_BRIGHT_YELLOW : OUT_WHITE,
-                 i == g_active ? OUT_BLUE : OUT_BLUE,
-                 i == g_active ? OUT_ATTR_BOLD : OUT_ATTR_NONE);
-        x += (int)strlen(buf);
-    }
-}
-
-static void draw_console(SwiRect r)
-{
-    int i, first, y, x;
-    char hdr[200];
-
-    if (r.h <= 0) return;
-    out_fill(r.x, r.y, r.w, r.h, ' ', OUT_WHITE, OUT_BLACK, OUT_ATTR_NONE);
-
-    /* borde visible: sin el, la consola parece parte del buffer */
-    snprintf(hdr, sizeof(hdr), "[consola] %s",
-             g_focus == 1 ? "F2/F3/F4  Ctrl+T tab" : "F2 extiende  F3 archivos");
-    hdr[r.w > 1 ? r.w - 1 : 0] = '\0';
-    out_text(r.x + 1, r.y, hdr, OUT_BRIGHT_BLUE, OUT_BLACK, OUT_ATTR_BOLD);
-
-    if (g_clog_n > 0) {
-        first = g_clog_n - (r.h - 1);
-        if (first < 0) first = 0;
-        y = r.y + 1;
-        for (i = first; i < g_clog_n && y < r.y + r.h; i++, y++)
-            out_text(r.x + 1, y, g_clog[i],
-                     OUT_BRIGHT_CYAN, OUT_BLACK, OUT_ATTR_NONE);
-    } else if (r.h > 1) {
-        out_text(r.x + 1, r.y + 1, "(sin salida)  escribe una expresion Fexl con F2",
-                 OUT_WHITE, OUT_BLACK, OUT_ATTR_NONE);
-    }
-    /* borde inferior */
-    for (x = r.x; x < r.x + r.w - 1; x++)
-        out_cell(x, r.y + r.h - 1, '-', OUT_BLUE, OUT_BLACK, OUT_ATTR_NONE);
-    if (g_focus == 1) {
-        char prompt[300];
-        snprintf(prompt, sizeof(prompt), "> %s", g_cmd);
-        out_text(r.x + 1, r.y + r.h - 1, prompt,
-                 OUT_BRIGHT_WHITE, OUT_BLACK, OUT_ATTR_BOLD);
-    }
-}
-
-static void draw_fileman(SwiRect r)
-{
-    g_fm_rows = (r.h > 1) ? (r.h - 1) : 0;
-    fileman_draw(g_fileman, r.x, r.y, r.w, r.h);
-}
 
 /* Despacha una accion al editor activo. Devuelve 1 si pidio quit. */
-static int dispatch(void *st, void *console, void *ed, SwiAction *a)
-{
-    int flags;
 
-    switch (a->kind) {
-    case SWI_A_MODE:
-        if (a->a == 3) console_reset(console, (int32_t)a->b);
-        shell_ui_sync(FUI_MODE, state_mode(st), 0, 0);
-        break;
-    case SWI_A_CMDLINE:
-        console_push(console, a->a);
-        break;
-    case SWI_A_EXEC: {
-        int32_t prefix = console_prefix(console);
-        const char *txt = console_text(console);
-        if (prefix == 47) {
-            win_editor_set_highlight(ed, txt, (int64_t)strlen(txt));
-            strncpy(g_last_pattern, txt, sizeof(g_last_pattern) - 1);
-            g_last_pattern[sizeof(g_last_pattern) - 1] = '\0';
-        }
-        console_execute(console, ed);
-        if (prefix != 47) {
-            const char *o = swi_eval_output();
-            strncpy(g_eval_msg, o ? o : "", sizeof(g_eval_msg) - 1);
-            g_eval_msg[sizeof(g_eval_msg) - 1] = '\0';
-            if (o && o[0]) shell_log_add(o);
-        }
-        shell_ui_sync(FUI_COMMAND, 0, 0, 0);
-        console_reset(console, 0);
-        break;
-    }
-    case SWI_A_SEARCH_NEXT:
-        console_repeat(console, ed, a->a != 0 ? 1 : 0);
-        win_editor_set_highlight(ed, console_text(console),
-                                 (int64_t)strlen(console_text(console)));
-        break;
-    default:
-        break;
-    }
-    flags = win_editor_step(ed, a);
-    if (flags & 4) state_set_mode(st, 1);
-    if ((flags & 1) && g_last_pattern[0] != '\0') {
-        win_editor_set_highlight(ed, g_last_pattern,
-                                 (int64_t)strlen(g_last_pattern));
-    }
-    if (flags & 1) shell_fmt_send(ed);   /* recalcular spans de sintaxis desde Fexl */
-    return flags & 2;
-}
 
-static void draw(void *canvas, void *ed, void *console, void *st,
-                 const char *filename)
-{
-    SwiRect top, body, bottom, tabs_r, buf_r, con_r, fm_r;
-    int32_t w = out_width(), h = out_height();
-    char buf[160];
-    int n;
 
-    (void)filename;
-    canvas_set_size(canvas, w, h);
-    canvas_layout(w, h, &top, &body, &bottom);
-    out_clear();
 
-    if (top.h > 0) {
-        out_fill(top.x, top.y, top.w, top.h,
-                 ' ', OUT_WHITE, OUT_BLUE, OUT_ATTR_BOLD);
-        out_text(top.x + 1, top.y, "swi",
-                 OUT_BRIGHT_WHITE, OUT_BLUE, OUT_ATTR_BOLD);
-    }
-
-    /* Toda la geometria de paneles vive en canvas.ll; main.c solo dibuja. */
-    (void)body;
-    canvas_layout_panels(w, h, g_ui.console_h, g_ui.fileman_w,
-                         &tabs_r, &buf_r, &con_r, &fm_r);
-    draw_tabs(tabs_r);
-    if (fm_r.w > 0) draw_fileman(fm_r);
-
-    {
-        void *win = canvas_active(canvas);
-        if (win != NULL) {
-            SwiRect r;
-            window_rect(win, &r);
-            win_editor_draw(ed, buf_r.x, buf_r.y, buf_r.w, buf_r.h);
-        }
-    }
-    draw_console(con_r);
-
-    if (bottom.h > 0) {
-        const char *ct = console_text(console);
-        int32_t prefix = console_prefix(console);
-        if (prefix != 0) {
-            n = snprintf(buf, sizeof(buf), "%c%s", (char)prefix, ct);
-        } else {
-            static const char *modes[] = { "NORMAL", "INSERT", "VISUAL", "COMMAND" };
-            int32_t m = state_mode(st);
-            const char *hint = (m == 0) ? "  i=insert  :w=save  :q=quit"
-                             : (m == 1) ? "  ESC=normal" : "";
-            n = snprintf(buf, sizeof(buf), "-- %s --%s  %dx%d%s  fexl:%s",
-                         (m >= 0 && m < 4) ? modes[m] : "?",
-                         win_editor_dirty(ed) ? " [+]" : "",
-                         (int)w, (int)h, (w >= 70 ? hint : ""), g_ui.status);
-        }
-        if (n > 0) {
-            if ((size_t)n >= sizeof(buf)) n = (int)sizeof(buf) - 1;
-            out_text(bottom.x, bottom.y, buf,
-                     OUT_BRIGHT_WHITE, OUT_BLACK, OUT_ATTR_NONE);
-        }
-    }
-
-    out_cursor(-1, -1);
-    out_present();
-}
-
-/* --- selftest (mismo flujo, sin termbox) --- */
-
-static void send_event(void *st, void *console, void *ed,
-                       int32_t type, int32_t key, uint32_t ch, int32_t mods)
-{
-    InEvent ev = {0};
-    SwiAction a = {0};
-    ev.type = type; ev.key = key; ev.ch = ch; ev.mods = mods;
-    state_step(st, &ev, 1, &a);
-    (void)dispatch(st, console, ed, &a);
-}
-
-static int selftest(void)
-{
-    const char *path = "/tmp/swi_selftest.txt";
-    FILE *f = fopen(path, "wb");
-    void *st, *canvas, *ed, *console;
-    char buf[32];
-    int64_t len;
-
-    if (f == NULL) return 1;
-    swi_eval_set_bin(SWI_FEXL_BIN);
-    fwrite("hola\nmundo\n", 1, 11, f);
-    fclose(f);
-    g_fileman = fileman_new();
-    if (g_fileman == NULL) return 1;
-    st = state_new(); canvas = canvas_new(); ed = win_editor_new(path);
-    console = console_new();
-    if (!st || !canvas || !ed || !console) return 1;
-    canvas_set_size(canvas, 80, 24);
-    (void)canvas_open(canvas, 0, ed);
-    console_set_eval(console, swi_eval);
-
-    printf("=== swi --selftest (integracion) ===\n");
-    memset(&g_ui, 0, sizeof(g_ui));
-    g_ui.console_h = 3;
-    if (fexl_ui_start(SWI_FEXL_BIN, SWI_UI_SCRIPT)) {
-        shell_ui_sync(FUI_INIT, 3, 0, 0);
-        SELF_CHECK(g_ui.nbind > 0 && strcmp(g_ui.bind[0].act, "console.toggle") == 0,
-                   "driver Fexl responde con BIND desde ui.fxl");
-        shell_ui_sync(FUI_CONSOLE, 3, 0, 0);
-        SELF_CHECK(g_ui.console_h == 10, "driver aplica toggle de consola");
-        fexl_ui_stop();
-    } else {
-        SELF_CHECK(0, "driver Fexl no disponible");
-    }
-    SELF_CHECK(win_editor_cursor(ed) == 0, "cursor inicial 0");
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'i', 0);
-    SELF_CHECK(state_mode(st) == 1, "i entra a INSERT");
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'X', 0);
-    len = doc_length(win_editor_doc(ed));
-    doc_read(win_editor_doc(ed), 0, 1, buf);
-    SELF_CHECK(len == 12 && buf[0] == 'X', "INSERT 'X' al principio");
-    send_event(st, console, ed, IN_EV_KEY, IN_KEY_ESC, 0, 0);
-    SELF_CHECK(state_mode(st) == 0, "Esc vuelve a NORMAL");
-    send_event(st, console, ed, IN_EV_CHAR, 0, '0', 0);
-    SELF_CHECK(win_editor_cursor(ed) == 0, "0 -> inicio de linea");
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'x', 0);
-    doc_read(win_editor_doc(ed), 0, 1, buf);
-    SELF_CHECK(buf[0] == 'h', "x borra el caracter bajo el cursor");
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'u', 0);
-    doc_read(win_editor_doc(ed), 0, 1, buf);
-    SELF_CHECK(buf[0] == 'X', "u deshace la borradura");
-    send_event(st, console, ed, IN_EV_CHAR, 0, '/', 0);
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'm', 0);
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'u', 0);
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'n', 0);
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'd', 0);
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'o', 0);
-    send_event(st, console, ed, IN_EV_KEY, IN_KEY_ENTER, 0, 0);
-    SELF_CHECK(win_editor_cursor(ed) == 6, "/mundo lleva el cursor al offset 6");
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'n', 0);
-    SELF_CHECK(win_editor_cursor(ed) == 6, "n con un solo match hace wrap al mismo offset");
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'd', 0);
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'd', 0);
-    len = doc_length(win_editor_doc(ed));
-    SELF_CHECK(len == 6, "dd borra la linea 'mundo' (quedan 6 bytes)");
-    send_event(st, console, ed, IN_EV_CHAR, 0, 'p', 0);
-    len = doc_length(win_editor_doc(ed));
-    SELF_CHECK(len == 12, "p restaura la linea desde el registro");
-    printf("  %d ok, %d fail\n", g_pass, g_fail);
-    console_destroy(console); canvas_destroy(canvas);
-    win_editor_destroy(ed); state_free(st);
-    fileman_destroy(g_fileman); g_fileman = NULL;
-    remove(path);
-    return g_fail > 0 ? 1 : 0;
-}
 
 int main(int argc, char **argv)
 {
     const char *filename = NULL;
-    int do_selftest = 0;
     int quit = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             usage(argv[0]);
             return 0;
-        } else if (strcmp(argv[i], "--selftest") == 0) do_selftest = 1;
+        }
         else if (filename == NULL) filename = argv[i];
     }
-    if (do_selftest) return selftest();
     if (tb_init() != TB_OK) { fprintf(stderr, "tb_init fallo\n"); return 1; }
     out_init();
 
@@ -510,7 +211,7 @@ int main(int argc, char **argv)
             }
         }
 
-        draw(canvas, ed, console, st, filename);
+        shell_draw(canvas, ed, console, st);
         rc = in_poll(&ev, 100);
         if (rc == IN_ERROR) break;
         if (rc == IN_TIMEOUT) continue;
@@ -598,10 +299,10 @@ int main(int argc, char **argv)
             } else if (ev.type == IN_EV_KEY && ev.key == IN_KEY_END) {
                 fileman_set_sel(g_fileman, fileman_count(g_fileman) - 1);
             } else if (ev.type == IN_EV_KEY && ev.key == IN_KEY_ENTER) {
-                fileman_open(0);
+                shell_fileman_open(0);
                 ed = g_tabs[g_active];
             } else if (ev.type == IN_EV_CHAR && ev.ch == 't') {
-                fileman_open(1);
+                shell_fileman_open(1);
                 ed = g_tabs[g_active];
             } else if ((ev.type == IN_EV_KEY && ev.key == IN_KEY_BACKSPACE) ||
                        (ev.type == IN_EV_CHAR && ev.ch == 'h')) {
@@ -616,7 +317,7 @@ int main(int argc, char **argv)
         {
             SwiAction a = {0};
             state_step(st, &ev, 1, &a);
-            if (dispatch(st, console, ed, &a)) quit = 1;
+            if (shell_dispatch(st, console, ed, &a)) quit = 1;
         }
     }
 

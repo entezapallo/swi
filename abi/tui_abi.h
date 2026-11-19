@@ -149,6 +149,9 @@ extern void    shell_fmt_send(void *ed);
 extern void    shell_toggle_console(void);
 extern void    shell_toggle_fileman(void);
 extern void    shell_toggle_tabs(void);
+extern void    shell_fileman_open(int32_t new_tab);
+extern void    shell_draw(void *canvas, void *ed, void *console, void *st);
+extern int32_t shell_dispatch(void *st, void *console, void *ed, SwiAction *a);
 
 /* --- console.ll --- */
 extern void    *console_new(void);
