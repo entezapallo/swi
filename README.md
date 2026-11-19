@@ -13,10 +13,11 @@ swi/
 ├── test/         arneses por módulo
 ├── abi/          tui_abi.h (frontera C ↔ IR)
 ├── core/ regex/ fsio/   módulos IR del motor
-├── fexlswi/      repo anidado: intérprete Fexl + regex + motor
+├── fexlswi/      intérprete Fexl + binarios (fexlswi / fexlswi0)
+├── regex/        11 módulos IR de regex compartidos con fexlswi
 ├── ui.fxl        driver Fexl (layout, bindings, STATUS/LOG)
 ├── build*/       binarios generados
-└── docs: BUILD.md · about.md · cheatsheet.md · extend.md · addformat.md · spec.md
+└── docs: BUILD.md · about.md · cheatsheet.md · extend.md · scripting.md · addformat.md · spec.md
 ```
 
 ## Arrancar
@@ -34,20 +35,19 @@ make install      # empaqueta build/ con un binario y una carpeta
 `make install` funciona después de `opt` u `opt-full`. `build/` queda con
 un solo binario (`swi`) y una sola carpeta (`fexlswi/`).
 
-Primero hace falta el intérprete anidado:
-
-```bash
-make -C fexlswi clean all
-```
+`make opt`, `opt-full`, `selfh` y `fast` compilan **todo junto**: primero
+`fexlswi` y después `swi`. No hace falta un paso previo separado. Si querés
+reconstruir solo el intérprete, `make -C fexlswi clean all` sigue funcionando.
 
 ## Diseño
 
 - **Vi-like**: NORMAL / INSERT / VISUAL / COMMAND, `h/j/k/l`, `dd/yy/p/u`,
   búsqueda `/pat` y `n/N`, selección visual.
-- **Lazy**: el viewport calcula y pinta solo las filas visibles, con wrap al
-  120% y truncate. Hoy el lazy es de **render**: `doc_load` todavía carga el
-  archivo completo en el `TextBuffer`; el I/O lazy queda para la Etapa D de
-  `document.ll`.
+- **Lazy**: el viewport pinta solo las filas visibles, y `doc_load()` mapea el
+  archivo con `mmap` y crea chunks **zero-copy**. Las ediciones son COW por
+  chunk y `:w` escribe chunk por chunk: nada se materializa completo. Quedan
+  deudas aceptadas (`find_in_doc` y `doc_replace_all` sí materializan, y
+  `doc_reindex()` es O(n)). Ver `spec.md` y `core/document.ll`.
 - **LLVM + musl**: motor en módulos `.ll`, perfiles `fast`, `opt`, `opt-full` y
   `selfh`, link dinámico contra musl (`-L/usr/lib/x86_64-linux-musl`,
   `--dynamic-linker`, `-rpath`). Ver `BUILD.md`.
@@ -57,8 +57,11 @@ make -C fexlswi clean all
 - **Colores**: el driver calcula spans con `regex.spans` y el editor mapea
   `style_id` a la paleta: 1 búsqueda/amarillo, 2 keyword/cian, 3 string/verde,
   4 comment/gris, 5 number/magenta. Ver `addformat.md`.
-- **Bioinformática**: el editor maneja texto plano; los visores de formatos
-  de registros están fuera del alcance actual.
+- **Scripting**: `ui.fxl` decide layout y atajos; la consola Fexl evalúa
+  expresiones con `regex.compile` / `regex.spans` / `abregex.*`. Ver
+  `scripting.md`.
+- **Bioinformática**: el editor maneja texto plano; los visores de FASTQ,
+  BCF/BAM y `rec/` quedan fuera del alcance actual (ver `spec.md`, §10).
 
 ## Qué hay dentro
 
@@ -79,14 +82,16 @@ make -C fexlswi clean all
 | `BUILD.md` | compilación, toolchain, perfiles y rutas |
 | `about.md` | arquitectura y decisiones de diseño |
 | `cheatsheet.md` | teclas, comandos y resolución de problemas |
-| `extend.md` | cómo scriptar y cómo extender la UI |
+| `extend.md` | cómo extender la UI (paneles, teclas, builtins) |
+| `scripting.md` | Fexl, protocolo, fexlswi y la API regex |
 | `addformat.md` | cómo agregar formateadores de sintaxis desde Fexl |
-| `spec.md` | especificación original del proyecto |
+| `spec.md` | especificación original del proyecto (histórica) |
 
 ## Tests
 
 ```bash
-make test         # 162 checks, perfil fast
+make test                  # 162 checks, perfil fast
 make test-opt
+make MODE=opt-full test
 make test-selfh
 ```

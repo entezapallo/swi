@@ -9,7 +9,7 @@ aplica. Así se pueden cambiar patrones sin recompilar.
 |---|---|
 | `ui.fxl` | define los patrones con `regex.compile`, corre `regex.spans` y emite líneas `SPANS` |
 | `tui/fexl_ui.h/.c` | evento `FUI_FMT` ('F'), parser de `SPANS <style> <start,end;...>` en `UiFrame.span[]` |
-| `tui/main.c` | `fmt_send()` escribe el buffer a `/tmp/swi_fmt_input.txt`, pide spans y los aplica con `fmt_add_span()` |
+| `tui/main.c` | `fmt_send()` lee el buffer con `doc_read()` (chunks), lo escribe a `/tmp/swi_fmt_input.txt`, pide spans y los aplica con `fmt_add_span()` |
 | `tui/win_editor.ll` | `win_editor_fmt()`, `win_editor_clear_spans()` y `hl_style_at()` |
 | `regex/format.ll` | `fmt_create`, `fmt_clear`, `fmt_add_span`, `fmt_cache_*` |
 | `abi/tui_abi.h` | constantes `FMT_SEARCH`, `FMT_KEYWORD`, `FMT_STRING`, `FMT_COMMENT`, `FMT_NUMBER` |
@@ -114,5 +114,10 @@ byte extra del evento `FUI_FMT` y branchá en `ui.fxl` con `eq`.
   `abregex.define` o un string con escapes.
 - `regex.spans` con un patrón que solo matcha vacío (`[^"]*`) devuelve nada.
 - El texto viaja por `/tmp/swi_fmt_input.txt`, no por el paquete de 4 bytes.
+  `fmt_send()` lo arma con `doc_read()` en bloques de 4 KB (no con `tb_data`),
+  así que funciona igual con archivos cargados en chunks.
 - Si el driver no está vivo, `fmt_send()` no hace nada y el editor sigue
   funcionando sin colores de sintaxis.
+- Los patrones viven en `ui.fxl`; el protocolo y la API regex están en
+  `scripting.md` (§4), y los estilos ya están documentados arriba en este
+  mismo archivo.

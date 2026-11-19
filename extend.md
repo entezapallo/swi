@@ -1,339 +1,357 @@
-# Extender `swi` con Fexl
+# Extender la UI de `swi`
 
-`swi` tiene una **consola Fexl** y un **driver Fexl persistente** que decide el
-layout y los atajos. Este documento explica cómo usarlos, cómo agregar scripting
-y si se puede hacer "en caliente".
+Este documento es para agregar **cosa nueva**: un panel, un widget, un modo, un
+builtin de consola o una tecla. Eso implica tocar C/IR, ABI, Makefile y tests.
 
-> **Scripting ≠ extender la UI.** Scripting es cambiar valores/comportamiento
-> desde Fexl (§2–§4). Extender la UI es agregar un panel, un widget o un modo
-> nuevo, que implica tocar código C/IR, ABI, Makefile y tests: ver **§8**.
+> **Extender la UI ≠ scripting.** Scripting es cambiar valores que el motor ya
+> entiende (layout, BIND, STATUS, patrones de color) desde `ui.fxl`: ver
+> **`scripting.md`**. Acá se explica cómo enseñarle al motor un valor, una
+> tecla o un panel nuevo.
 
 ---
 
 ## 1. Modelo mental
 
 ```
-termbox ──evento──> motor (IR/C) ──EV……──> ui.fxl (Fexl, persistente)
-                         ^                       │
-                         └── comandos del frame ─┘
+termbox ──InEvent──> state.ll ──SwiAction──> win_editor.ll / console.ll
+                          │                          │
+                          └── ui_sync() ──> ui.fxl ──┘ (decide layout/BIND)
 ```
 
-- **El motor** es dueño de los `Document` (el texto) y de cada tecla de edición.
-  Nunca le pasa el buffer a Fexl.
-- **Fexl** es dueña del layout (alto de consola, ancho del file manager, tabs
-  colapsadas), del texto de estado y de la tabla de atajos.
-- El archivo que manda es `swi/ui.fxl`. Cambiarlo cambia la UI **sin tocar C**.
+- **`in.c`** entrega eventos ya masticados (`IN_EV_KEY/CHAR/RESIZE`,
+  códigos `IN_KEY_*`).
+- **`state.ll`** es la máquina de modos (0 NORMAL, 1 INSERT, 2 VISUAL,
+  3 COMMAND) y produce un `SwiAction`.
+- **`win_editor.ll` / `console.ll`** ejecutan la acción sobre el `Document`.
+- **`main.c`** es el pegamento: loop, foco, tabs, dibujo de paneles y sesión.
+- **`ui.fxl`** decide cuánto espacio ocupa cada panel y qué atajos están
+  activos. El protocolo completo está en `scripting.md`.
+
+Regla de oro: **el motor de edición nunca depende de la TUI**, y la TUI nunca
+mete código de edición en `main.c`. Si una acción tiene estado, va en un módulo
+IR con su test.
 
 ---
 
-## 2. Usar la consola
-
-1. `Ctrl+E` (o `F2`) abre/fija la consola y le da el foco.
-2. Escribí una expresión Fexl, p. ej.:
-   ```
-   say "hola desde fexl"
-   regex.count "a" "banana"
-   ```
-3. `Enter` la evalúa con `swi_eval` (preload `load_basic`, `load_output`,
-   `load_regex`, `load_script`). La salida aparece en el log de la consola.
-4. `Esc` devuelve el foco al buffer.
-
-Atajos relacionados: `Ctrl+F` file manager, `Ctrl+B` colapsar tabs,
-`Ctrl+T` tab nueva, `Ctrl+W` cerrar tab. Los `F2/F3/F4` también funcionan, pero
-**F3 lo intercepta el escritorio** (abre el launcher), por eso existen los
-equivalentes con Ctrl.
-
----
-
-## 3. Protocolo (referencia)
-
-### Motor → Fexl
-
-Cada evento son **4 bytes**, sin lines ni parseo de strings:
-
-```
-[codigo_evento, console_h, tabs_col, fileman_w]
-```
-
-| Byte | Código | Evento |
-|---|---|---|
-| `i` | 105 | INIT (al arrancar) |
-| `2` | 50 | toggle consola |
-| `3` | 51 | toggle file manager |
-| `4` | 52 | toggle tabs colapsadas |
-| `m` | 109 | cambio de modo (`console_h` trae 0..3) |
-| `c` | 99 | comando ejecutado |
-| `t` | 116 | cambio de tabs |
-| `q` | 113 | salir |
-
-Los tres bytes de estado los guarda el motor; Fexl los recibe, los transforma
-y los devuelve. Por eso el driver puede ser **stateless**: no necesita guardar
-estado entre eventos (sí es un proceso persistente, pero cada evento viaja
-completo).
-
-### Fexl → motor
-
-Frame de líneas terminado con `.` y `fflush stdout`:
-
-```
-CONSOLE_H 03        ; 0 = off, 3 = brief, 10 = extended
-TABS_COL 00         ; 0 = expandido, 1 = colapsado
-FILEMAN_W 00        ; 0 = off, 40 = ancho del panel
-STATUS NORMAL       ; texto libre (una palabra)
-LOG CMD             ; mensaje para el log
-BIND C-E console.toggle
-...
-.
-```
-
-Los `BIND` se reenvían **en cada frame** y `main.c` los usa de verdad:
-`has_bind("console.toggle")` decide si la tecla actúa. Si quitás un `BIND` de
-`ui.fxl`, ese atajo deja de funcionar aunque la tecla siga en el código. Si el
-driver no está disponible (`nbind == 0`), se usa el mapping histórico por
-robustez. Ver §5 para cablear uno nuevo de punta a punta.
-
----
-
-## 4. Cómo agregar scripting
-
-### 4.1 Cambiar el layout
-
-Editá `swi/ui.fxl`. Ejemplo: consola siempre extendida y file manager más
-ancho:
-
-```fexl
-\ch2=10                      ; en vez del toggle
-\fw2=((eq ce 51) 60 0)       ; F3 -> 60 columnas
-```
-
-Atención: `num` (líneas 16–23) solo mapea `0,1,2,3,10,40` porque este build de
-Fexl no tiene `as_str`. Si querés otro valor (p. ej. 60), agregalo:
-
-```fexl
-((eq n 60) "60" ...)
-```
-
-### 4.2 Cambiar el texto de estado
-
-`STATUS` acepta una palabra (sin espacios, porque el C lo lee con `%63s`):
-
-```fexl
-\st2="LISTO"
-```
-
-### 4.3 Usar otro script sin recompilar
-
-La ruta se inyecta en compilación con `UI_SCRIPT_DEF` en `swi/Makefile`:
-
-```make
-UI_SCRIPT_DEF := -DSWI_UI_SCRIPT="\"$(abspath $(CURDIR)/ui.fxl)\""
-```
-
-Cambiala por tu archivo y recompilá. Para **no recompilar**, podés pasarle una
-variable de entorno a `main.c` (no implementado hoy): usar `getenv("SWI_UI")`
-y default a `SWI_UI_SCRIPT`.
-
-### 4.4 Requisitos del script
-
-`fexlswi0` **no** trae los builtins preloadados. Todo script debe empezar:
-
-```fexl
-load_basic
-load_output
-load_cmp
-load_file
-load_str
-load_extend
-load_regex
-load_script
-evaluate \;
-```
-
-`evaluate \;` evalúa el resto del archivo con esos módulos en scope. Sin eso
-aparecen `Undefined symbol say/on line N`.
-
----
-
-## 5. Cablear una acción nueva (BIND de verdad)
-
-Hoy los BIND son informativos. Para que un BIND nuevo **ejecute** una acción:
-
-1. **`ui.fxl`**: agregar `say "BIND C-X mi.accion"` dentro de `emit`.
-2. **`tui/fexl_ui.h`**: agregar el código de evento, p. ej. `FUI_MI = 'x'`.
-3. **`tui/fexl_ui.c`**: nada (el paquete es genérico).
-4. **`tui/main.c`**: en el loop, antes de `state_step`, manejar la tecla:
-   ```c
-   if (ev.type == IN_EV_CHAR && (ev.mods & IN_MOD_CTRL) && ev.ch == 'x') {
-       mi_accion();                       /* C o IR */
-       ui_sync(FUI_MI, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
-       continue;
-   }
-   ```
-5. Agregar un test en `swi/test/` y correr `make test`.
-
-Para acciones que cambien layout, la lógica va en `ui.fxl` (el `case` del
-evento) y el C solo aplica lo que devuelve el frame.
-
----
-
-## 6. Hot reload (ya implementado)
-
-El loop de `main.c` guarda `st_mtime` **y** `st_mtim.tv_nsec` de `ui.fxl` con
-`stat()`, así que detecta ediciones dentro del mismo segundo. Si cambió:
-
-```c
-fexl_ui_stop();
-fexl_ui_start(SWI_FEXL_BIN, SWI_UI_SCRIPT);
-ui_sync(FUI_INIT, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
-log_add("ui.fxl recargado");
-```
-
-Como el estado vive en C, el editor sigue donde estaba: texto, cursor, tabs,
-foco, layout y directorio se conservan. Los BIND del nuevo script quedan
-activos en el primer frame. Editar `ui.fxl` **no recompila** (se sacó del
-Makefile como dependencia de `main.o`; solo se embebe su ruta).
-
-Si `ui.fxl` tiene un error, `fexl_ui_event()` captura la línea `Undefined
-symbol`/`syntax error`, conserva el último frame bueno y reporta el error en el
-log; el editor no cambia de layout por un script roto. El reintento es un loop
-acotado a dos intentos, no recursión.
-
-Las definiciones de la consola sí sobreviven al reload: `eval.c` guarda un
-script de sesión por PID con todo lo escrito y lo re-evalúa completo. Cada
-`Enter` pasa primero por el evento `FUI_EVAL`, así que el driver también decide
-el `STATUS` (`EVAL`) y el `LOG`. Lo que no sobrevive es una definición hecha
-directamente dentro del driver (`\\mi_fn=...` en `ui.fxl`), porque el intérprete
-se reinicia.
-
----
-
-## 7. Trampas conocidas
-
-- `as_str` no existe en este build: usá `num` o literales.
-- `fflush stdout` es obligatorio al final de cada frame; sin él la salida
-  queda buffered y el motor espera para siempre.
-- El binario `fexlswi0` se invoca por **ruta absoluta** (`EVAL_DEF`) y el
-  script por **ruta absoluta** (`UI_SCRIPT_DEF`). Si `main.o` se compiló con la
-  ruta relativa de fallback (`../Fexl/...`), el driver muere con `exit 127` al
-  arrancar desde fuera de `swi/`. Forzá el rebuild si tocás el Makefile.
-- `fexl_ui_event` reinicia el driver automáticamente si el hijo murió, e
-  ignora `SIGPIPE`, así que un fallo del script no tumba el editor.
-- `eval.c` usa un script de sesión y un temporal de salida con PID
-  (`/tmp/swi_fexl_session_<pid>.fxl`, `/tmp/swi_eval_<pid>.out`), lanza el
-  intérprete con `fork/exec` (sin shell) y reinicia la sesión al arrancar.
-- El protocolo tiene un evento `FUI_EVAL` ('x'); `ui.fxl` responde con
-  `STATUS EVAL` y el motor agrega la salida real al log.
-- Los buffers nuevos usan `doc_new()` (en memoria) y una ruta única por
-  PID/contador: no truncan `/tmp/swi_untitled.txt` al abrir.
-- La sesión la escribe C con `memory.ll` (tabs, cursor, foco, layout, cwd);
-  Fexl solo transforma el estado que recibe en cada evento.
-- Los eventos son bytes: si agregás un código nuevo, no puede ser `10` (LF),
-  porque se confundiría con el final de línea del frame.
-
----
-
-## 8. Extender la UI (esto NO es scripting)
-
-Scripting cambia **valores** que el motor ya sabe interpretar. Extender la UI
-agrega **cosa nueva**: un panel, un widget, un modo, una forma de mostrar
-datos. Eso no se hace desde `ui.fxl` solo: se agrega código y se conecta al
-protocolo.
-
-### 8.1 Mapa de archivos
+## 2. Mapa de archivos
 
 | Archivo | Para qué sirve al extender |
 |---|---|
-| `tui/out.h`, `tui/out.c` | Única forma de dibujar: `out_cell`, `out_fill`, `out_text`, `out_cursor`. Paleta `OUT_*` y atributos `OUT_ATTR_*`. |
-| `tui/in.h`, `tui/in.c` | Eventos de entrada: `IN_EV_KEY/CHAR/RESIZE`, códigos `IN_KEY_*`. |
-| `tui/state.ll` | Máquina de modos (0 NORMAL, 1 INSERT, 2 VISUAL, 3 COMMAND) y `SwiAction`. |
-| `tui/win_editor.ll` | Dibujo del buffer, cursor, gutter, resaltado. |
-| `tui/console.ll` | Línea de comandos y builtins (`:w`, `:e`, etc.). |
-| `abi/tui_abi.h` | Espejo en C de los structs usados por el IR. Si agregás struct IR, agregalo acá. |
+| `tui/out.h`, `tui/out.c` | Única forma de dibujar: `out_cell`, `out_fill`, `out_text`, `out_cursor`. Paleta `OUT_*`, atributos `OUT_ATTR_*`. |
+| `tui/in.h`, `tui/in.c` | Eventos de entrada: tipos `IN_EV_*`, códigos `IN_KEY_*`, mods `IN_MOD_*`. |
+| `tui/state.ll` | Modo activo, `state_step()`, tabla tecla+modo → `SwiAction`. |
+| `tui/win_editor.ll` | Dibujo del buffer, cursor, gutter, movimientos y resaltado. Lee el texto con `doc_read()`. |
+| `tui/console.ll` | Línea de comandos y builtins (`:w`, `:e`, …). |
 | `tui/canvas.ll` | `canvas_layout_panels()`: geometría de tabs/buffer/consola/file manager. |
-| `tui/main.c` | Dibujo de tabs, consola y file manager; loop de foco; sesión. |
-| `ui.fxl` | Dueño del layout: decide cuánto espacio ocupa cada panel. |
-| `tui/fexl_ui.h/.c` | `UiFrame`: lo que Fexl devuelve al motor. |
-| `Makefile` | Listas `TUI_LL`, `ENGINE_LL`, `ALL_C`, targets de test. |
+| `tui/memory.ll` | Sesión: tabs, cursor, foco, layout, `last_dir`. |
+| `tui/main.c` | Dibujo de tabs, consola y file manager; loop de foco; hot reload; selftest. |
+| `tui/fexl_ui.h/.c` | `UiFrame`: lo que Fexl devuelve al motor. Parser de `SPANS`/`BIND`. |
+| `abi/tui_abi.h` | Espejo en C de los structs y funciones del IR. Si agregás algo al IR, agregalo acá. |
+| `core/document.ll` | Dueño del texto: `doc_read`, `doc_length`, `doc_insert`, `doc_delete`. |
+| `ui.fxl` | Dueño del layout y de los BIND. |
+| `Makefile` | Listas `TUI_LL`, `ENGINE_LL`, `REGEX_LL`, `ALL_C` y targets de test. |
 | `test/` | Un arnés por módulo IR nuevo. |
 
-### 8.2 Dos caminos
+---
+
+## 3. Dos caminos
 
 **A) Chrome de UI en C (rápido).** Si el panel es puramente presentación
-(tabs, consola, file manager hoy), lo implementás directo en `main.c` con un
-`static struct`, dibujás con `out_text`/`out_fill` y manejás teclas en el loop.
-No tiene test IR separado, pero es válido y es lo que ya hace el código actual.
+(tabs, consola y file manager hoy), implementalo directo en `main.c` con un
+`static struct`, dibujá con `out_text`/`out_fill` y manejá teclas en el loop. No
+tiene test IR separado, pero es válido y es lo que hace el código actual.
 
 **B) Módulo IR (recomendado para lógica real).** Si el panel tiene estado,
-búsqueda, navegación o formateo, hacelo como módulo `.ll` para que entre en los
-dos perfiles (fast y opt con LTO) y tenga su propio test.
+búsqueda, navegación o formateo, hacelo como módulo `.ll`: entra en los cuatro
+perfiles (`fast`, `opt`, `opt-full`, `selfh`) y tiene su propio test.
 
-### 8.3 Receta: agregar un panel "outline"
+---
 
-1. **ABI.** En `abi/tui_abi.h` declará el struct y las funciones:
+## 4. Receta: agregar un panel "outline"
+
+### 4.1 ABI
+
+En `abi/tui_abi.h` declará el struct y las funciones:
+
+```c
+extern void *outline_new(void);
+extern void  outline_destroy(void *o);
+extern int   outline_step(void *o, InEvent *ev);
+extern void  outline_draw(void *o, int32_t x, int32_t y,
+                          int32_t w, int32_t h);
+```
+
+### 4.2 Módulo IR
+
+`tui/outline.ll`, mismo patrón que `win_editor.ll`:
+
+```llvm
+%Outline = type { ptr, i64 }        ; items, seleccion
+
+define ptr @outline_new() { ... }
+define void @outline_draw(ptr %o, i32 %x, i32 %y, i32 %w, i32 %h) {
+  ; declare i32 @out_cell(i32, i32, i32, i32, i32, i32)
+  ...
+}
+```
+
+La regla genérica `$(BUILD)/%.o: %.ll` ya compila cualquier `.ll` de `tui/`
+con `opt -passes=verify` + `llc`. Solo agregá el nombre a `TUI_LL`.
+
+### 4.3 Test separado
+
+```make
+TUI_LL := state window canvas win_editor console memory outline
+
+$(BUILD)/test_outline.o: test/test_outline.c tui/in.h | $(BUILD)
+	$(CLANG) $(CFLAGS) -I. -c $< -o $@
+$(BUILD)/test_outline: $(BUILD)/test_outline.o $(BUILD)/outline.o
+	$(CLANG) $(TEST_LDFLAGS) $^ -o $@
+
+test: ... $(BUILD)/test_outline
+	./$(BUILD)/test_outline
+```
+
+Verificá el módulo solo antes de integrar:
+
+```bash
+opt-21 -passes=verify -disable-output -mtriple=x86_64-linux-musl tui/outline.ll
+make test && ./build/test_outline
+```
+
+### 4.4 Integración en `main.c`
+
+```c
+void *outline = outline_new();
+
+/* en draw(): el rect sale del layout, nunca hardcodeado */
+Rect ol = g_ui.rects[SWI_PANEL_OUTLINE];
+outline_draw(outline, ol.x, ol.y, ol.w, ol.h);
+```
+
+Agregá un valor a `g_focus` (hoy 0=buffer, 1=consola, 2=file manager) y una
+rama en el loop **antes** de `state_step`, para que la tecla no llegue al
+editor:
+
+```c
+if (g_focus == 3 && outline_step(outline, &ev)) {
+    ui_sync(FUI_OUTLINE, ...);
+    continue;
+}
+```
+
+### 4.5 Protocolo Fexl
+
+Si querés que Fexl decida el tamaño del panel:
+
+1. `tui/fexl_ui.h`: campo `int32_t outline_h` en `UiFrame`.
+2. El paquete pasa a 5 bytes: `[ev, ch, tc, fw, oh]`. Actualizá
+   `fexl_ui_event()` y **todas** las llamadas a `ui_sync(...)` (son ~10).
+3. `ui.fxl`: leer un quinto `fgetc` y emitir `say ["OUTLINE_H " (num oh)]`,
+   agregando `60` a la tabla `num`.
+4. `fexl_ui.c`: parser de la nueva línea con `sscanf`.
+5. `main.c`: usar `g_ui.outline_h` en `canvas_layout_panels()`.
+
+Recordá la regla del protocolo: un código nuevo no puede ser `10` (LF).
+
+### 4.6 Selftest
+
+Agregá un `SELF_CHECK` en `selftest()` (`tui/main.c`) y corré
+`make test test-opt test-selfh`.
+
+---
+
+## 5. Agregar un builtin de consola (`:foo`)
+
+Los builtins viven en `console_execute()` (`tui/console.ll`). Hoy el chain es:
+
+```
+:w → do_save → win_editor_save
+:q → do_quit → win_editor_request_quit
+:q! / :wq / :w <ruta> / :e <ruta>
+/… → win_editor_search
+otro → callback eval (Fexl) en el bloque `unknown`
+```
+
+### 5.1 Pasos
+
+1. **Constante** en `tui/console.ll`:
+   ```llvm
+   @CMD_FOO = private global [4 x i8] c"foo\00"
+   ```
+
+2. **Comparación** en `cmd_colon`, insertada en el chain de `strcmp` antes de
+   `unknown` (el orden importa: `:e` y `:w` tienen prefijo, por eso van
+   después de los exactos):
+   ```llvm
+   %rf = call i32 @strcmp(ptr %buf, ptr @CMD_FOO)
+   %isf = icmp eq i32 %rf, 0
+   br i1 %isf, label %do_foo, label %saveas_chk
+   ```
+
+3. **Rama de ejecución**:
+   ```llvm
+   do_foo:
+     %r = call i32 @win_editor_foo(ptr %ed)
+     ret i32 1                ; 1 = comando consumido
+   ```
+
+4. **Declaración** en `abi/tui_abi.h` si `win_editor_foo` es nuevo:
    ```c
-   extern void *outline_new(void);
-   extern void  outline_destroy(void *o);
-   extern int   outline_step(void *o, InEvent *ev);
-   extern void  outline_draw(void *o, int32_t x, int32_t y,
-                             int32_t w, int32_t h);
+   extern int32_t win_editor_foo(void *ed);
    ```
 
-2. **Módulo IR** `tui/outline.ll`: mismo patrón que `win_editor.ll` —
-   `define ptr @outline_new()`, `define void @outline_draw(...)`, con declares
-   a `out_cell`/`out_text`. Compilación por módulo ya la hace la regla genérica
-   `$(BUILD)/%.o: %.ll` con `opt -passes=verify` + `llc`.
+5. **Test**: agregá un caso en `test/test_console.c` con un stub de
+   `win_editor_foo` y verificá que `console_execute()` devuelve 1 y que no
+   cae al `eval` callback (`n_eval` queda en 0).
 
-3. **Test separado** `test/test_outline.c` y targets en el `Makefile`:
-   ```make
-   TUI_LL := state window canvas win_editor console memory outline
-   $(BUILD)/test_outline: $(BUILD)/test_outline.o $(BUILD)/outline.o
-       $(CLANG) $^ -o $@
-   test: ... $(BUILD)/test_outline
-       ./$(BUILD)/test_outline
-   ```
-   Verificá el módulo solo antes de integrar:
-   ```bash
-   opt-21 -passes=verify -disable-output tui/outline.ll
-   ./build/test_outline
-   ```
+6. **Documentación**: una fila en la tabla de comandos de `cheatsheet.md`.
 
-4. **Integración en `main.c`**: instanciar, dibujar en su rect y darle foco:
-   ```c
-   void *outline = outline_new();
-   /* en draw(): el rect sale del layout, no hardcodeado */
-   outline_draw(outline, ol_r.x, ol_r.y, ol_r.w, ol_r.h);
-   /* en el loop: g_focus = 3 para el outline */
-   ```
-   Agregá un valor a `g_focus` (hoy 0=buffer, 1=consola, 2=file manager) y una
-   rama en el loop antes de `state_step`.
+### 5.2 Trampas
 
-5. **Protocolo Fexl.** Si querés que Fexl decida el tamaño del panel:
-   - `fexl_ui.h`: agregá campo `int32_t outline_h` a `UiFrame`.
-   - La respuesta del frame pasa a 5 bytes: `[ev, ch, tc, fw, oh]`. Actualizá
-     `fexl_ui_event()` y **todas** las llamadas a `ui_sync(...)`.
-   - `ui.fxl`: leer un quinto `fgetc` y emitir `say ["OUTLINE_H " (num oh)]`.
-   - `fexl_ui.c`: parser de la nueva línea con `sscanf`.
-   - `main.c`: usar `g_ui.outline_h` al calcular los rects.
+- Si tu builtin tiene argumentos (`:w <ruta>`), parseá desde `%buf + 2` como
+  hace `do_saveas`; no hardcodes el offset si el prefijo puede cambiar.
+- Cualquier texto que no matchee un builtin cae en `unknown` y se manda a
+  Fexl. Si querés que `:foo` **no** vaya a Fexl, consumilo con `ret i32 1`.
+- `FUI_COMMAND` se emite en `main.c` cuando `console_execute()` devuelve 1;
+  el driver Fexl solo decide el `LOG`.
 
-6. **Selftest**: agregá un `SELF_CHECK` en `selftest()` y corré `make test`.
+---
 
-### 8.4 Modo nuevo vs. foco
+## 6. Cablear una tecla nueva
+
+Para una tecla que no existía (p. ej. `K` para "matar hasta el final"):
+
+1. **`tui/in.h`**: si es una tecla especial, agregá el código al enum `InKey`;
+   si es un carácter, no hace falta.
+2. **`tui/state.ll`**: en `motion_of()` / `state_step()`, agregá la entrada a
+   la tabla tecla+modo → acción. Usá `act(ptr %out, i32 %kind, ...)` con un
+   `SWI_ACT_*` nuevo.
+3. **`abi/tui_abi.h`**: agregá el valor al enum `SwiAction`.
+4. **`tui/win_editor.ll`**: en `win_editor_step()`, agregá un `switch` para el
+   kind nuevo y llamá a tu función IR.
+5. **`test/test_state.c`**: verificá que con la tecla y el modo correctos se
+   emite la acción esperada (y que en otro modo no).
+6. **`test/test_win_editor.c`**: verificá el efecto sobre el `Document` con
+   `doc_read()`/`doc_length()`.
+
+Si la tecla es un atajo de **panel** (consola, file manager, tabs), no va en
+`state.ll`: se maneja en el loop de `main.c` y se declara con un `BIND` en
+`ui.fxl` (ver `scripting.md`, §6).
+
+---
+
+## 7. Extender el file manager
+
+El file manager hoy es chrome en `main.c`:
+
+| Función | Rol |
+|---|---|
+| `fileman_load()` | listado del directorio `g_fileman_dir` vía `fsio_list_dir` |
+| `fileman_open(new_tab)` | abre la entrada elegida, en tab actual o nueva |
+| `fileman_parent()` | sube un nivel |
+| `toggle_fileman()` | `ui_sync(FUI_FILEMAN)` + `fileman_load()` + set_focus(2) |
+| `fileman_draw()` | `out_text` de cada entrada; `..` siempre es la primera |
+
+Para agregar, por ejemplo, orden por fecha:
+
+1. `fsio_list_dir` ya entrega nombre; necesitás `stat`. Agregá un módulo IR
+   `fsio/fsio_stat.ll` (o extendé `fsio_list_dir`) con `declare` en
+   `abi/tui_abi.h`.
+2. Ordená en `fileman_load()` **después** de traer el listado, no en el IR de
+   `fsio` (ese módulo no debe saber de UI).
+3. Agregá una tecla en el loop de `main.c` (con su `BIND` en `ui.fxl`) para
+   cambiar el criterio de orden.
+4. Test: `test/test_memory.c` cubre `last_dir`; el ordenamiento nuevo merece
+   su propio arnés si va en IR.
+
+---
+
+## 8. Foco y paneles
+
+`g_focus` decide quién recibe las teclas:
+
+| Valor | Panel |
+|---|---|
+| 0 | buffer (editor) |
+| 1 | consola |
+| 2 | file manager |
+| 3 | panel nuevo (ej. outline) |
+
+Reglas:
+
+- El foco **siempre arranca en 0** al crear un editor. `memory.ll` guarda el
+  foco de la sesión, pero `main.c` lo fuerza al buffer al arrancar para que
+  las flechas no queden capturadas por un panel abierto antes.
+- `Esc` en un panel vuelve al buffer; en COMMAND cancela.
+- Un panel con foco propio es un **overlay**: no tocás `state.ll` y la edición
+  sigue intacta. Es preferible a un modo nuevo.
+
+---
+
+## 9. Depuración
+
+```bash
+# 1) verificar un módulo IR aislado antes de linkear
+opt-21 -passes=verify -disable-output -mtriple=x86_64-linux-musl tui/outline.ll
+
+# 2) test del módulo
+make test && ./build/test_outline
+
+# 3) selftest de integración (consola, Fexl, edición)
+./build/swi --selftest
+
+# 4) todos los perfiles
+make test && make test-opt && make MODE=opt-full test && make test-selfh
+```
+
+Si el driver Fexl no responde, mirá el log de la consola y
+`fexlswi/bin/fexlswi0`. Si el módulo IR falla en `opt-full` pero no en `fast`,
+buscá símbolos sin `declare` (LTO con `globaldce` los delata).
+
+Para probar cambios de `ui.fxl` sin recompilar: editá el archivo y el hot
+reload de `main.c` reinicia el driver en el próximo evento. Ver
+`scripting.md`, §3.
+
+---
+
+## 10. Modo nuevo vs. foco
 
 - Si el panel **reemplaza la edición** (como COMMAND), agregá un modo en
-  `state.ll`: cambia el `switch i32 %mode`, el enum en C y los tests de
-  `test_state`. Es más invasivo y hay que actualizar la barra de estado.
-- Si el panel **es un overlay con su propio foco** (como consola/file manager),
-  usá `g_focus` en C: no tocás `state.ll` y la edición queda intacta. Es lo
-  que hicimos acá.
+  `state.ll`: cambia el `switch i32 %mode`, el enum en C, la barra de estado y
+  los tests de `test_state`. Es más invasivo.
+- Si el panel **es un overlay con foco propio**, usá `g_focus` en C: no tocás
+  `state.ll` y la edición queda intacta. Es lo que hicimos para consola y file
+  manager.
 
-### 8.5 Qué se puede hacer "en caliente" y qué no
+---
+
+## 11. Qué se puede hacer "en caliente"
 
 | Cambio | ¿En caliente? |
 |---|---|
-| Alto de consola, ancho de file manager, texto de estado, BIND en `ui.fxl` | Sí, con el reload de §6 |
-| Agregar un panel nuevo (C/IR), un modo o un builtin de consola | No: requiere recompilar |
-| Agregar un valor numérico nuevo al protocolo | No: requiere recompilar C y Fexl |
+| Alto de consola, ancho de file manager, STATUS, LOG, BIND, patrones de color | Sí: editar `ui.fxl` (reload de `scripting.md`, §3) |
+| Definiciones en la consola | Sí: persisten en el script de sesión por PID |
+| Panel nuevo (C/IR), modo, builtin de consola o tecla | No: requiere recompilar |
+| Valor numérico nuevo en el protocolo (5° byte, etc.) | No: requiere recompilar C y Fexl |
 
-La regla: **si el cambio es solo un valor que el motor ya entiende**, podés
-hacerlo en caliente; **si agregás una palabra nueva al protocolo o código
-nuevo**, hay que recompilar.
+La regla: **si el cambio es solo un valor que el motor ya entiende**, es en
+caliente; **si agregás una palabra nueva al protocolo o código nuevo**, hay
+que recompilar.
+
+---
+
+## 12. Checklist antes de commit
+
+- [ ] `declare` en el módulo IR y espejo en `abi/tui_abi.h`.
+- [ ] Nombre agregado a `TUI_LL` o `ENGINE_LL` en el `Makefile`.
+- [ ] `opt-21 -passes=verify` limpio para cada `.ll` tocado.
+- [ ] Test separado en `test/` y target en `make test`.
+- [ ] `SELF_CHECK` en `selftest()` si cambia el comportamiento integrado.
+- [ ] `BIND` en `ui.fxl` si la acción se activa con tecla.
+- [ ] Documentación: `cheatsheet.md` (teclas) y/o `scripting.md` (BIND).
+- [ ] `make test test-opt test-selfh` y `make MODE=opt-full test` en verde.
+- [ ] `make install` deja `build/swi` + `build/fexlswi/`.
+
+Ver también: `scripting.md` (Fexl, protocolo y regex) y `addformat.md`
+(formateadores de sintaxis).

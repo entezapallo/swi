@@ -68,14 +68,19 @@ borra, `Esc` devuelve el foco al buffer.
 ## Build
 
 ```bash
-make -C fexlswi clean all    # intérprete estático fexlswi / fexlswi0
-make clean
-make fast                    # build/swi
+make clean all               # limpia, no compila
+make fast                    # build/swi (debug)
 make opt                     # build/opt/swi
+make opt-full                # build/opt-full/swi (mínimo)
 make selfh                   # build/selfh/swi
+make install                 # build/swi + build/fexlswi/
 make test test-opt test-selfh
+make MODE=opt-full test
 make FEXL=/otro/fexlswi0 opt # override del intérprete
 ```
+
+`make opt` (y los otros perfiles) compila `fexlswi` primero: no hace falta un
+paso previo. Ver `BUILD.md`, `scripting.md` y `extend.md`.
 
 ## Problemas comunes
 

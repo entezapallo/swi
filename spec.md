@@ -1,3 +1,9 @@
+> **Nota:** este es el handoff original (documento histórico). La sección 10
+> («lo que le falta al motor») ya está implementada: `doc_load` mapea con
+> `mmap`, los chunks son COW y `doc_save` escribe chunk por chunk. El estado
+> actual está en [`README.md`](README.md), [`about.md`](about.md) y
+> [`scripting.md`](scripting.md).
+
 # Handoff TUI — lo cerrado
 
 Solo decisiones que el usuario dijo o confirmó. Las propuestas sin confirmar y las preguntas abiertas se dejaron afuera.

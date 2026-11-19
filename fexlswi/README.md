@@ -1,3 +1,8 @@
+> **Nota:** este es el README original del intérprete Fexl (upstream). Las
+> particularidades de este build (extensión regex, módulos compartidos en
+> `../regex/`, binarios `fexlswi`/`fexlswi0` y perfiles) están en
+> [`BUILD.md`](BUILD.md) y en [`../scripting.md`](../scripting.md).
+
 # fexl - Function EXpression Language
 
 [Fexl](http://fexl.com) is a simple but powerful scripting language.  It allows

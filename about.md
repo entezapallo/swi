@@ -26,16 +26,22 @@ quoted), así que la consola no podía correr dentro del driver. La solución fu
 - `eval.c` acumula las líneas de la consola en un script de sesión por PID y
   re-evalúa el script completo, así que las definiciones sobreviven.
 
-El binario `fexlswi0` es **estático y autocontenido**: `swi` lo usa
-dinámicamente como proceso, no como librería compartida. El sufijo `0` evita
-que Fexl cargue `main.fxl`.
+El binario `fexlswi0` es **musl dinámico**, como `swi`: `swi` lo usa como
+proceso aparte (`fork/exec`), no como librería compartida. El sufijo `0` evita
+que Fexl cargue `main.fxl`. Ver `scripting.md`, §1.
 
 ## ¿Por qué `swi` tiene módulos regex?
 
-No son opcionales: `format.ll` (resaltado de búsqueda) llama a
-`regex_compile`, `rx_charclass_*`, `rx_run` y `thread_*`, y `document.ll`
-usa `replace_all`. Los patrones de usuario se evalúan en `fexlswi`, pero el
-resaltado en pantalla se calcula dentro del editor con esos módulos.
+No son opcionales: `format.ll` (resaltado) llama a `regex_compile`,
+`rx_charclass_*`, `rx_run` y `thread_*`, y `document.ll` usa `replace_all`.
+Los patrones de usuario se evalúan en `fexlswi`, pero el resaltado en pantalla
+se calcula dentro del editor con esos módulos.
+
+Antes había dos copias del motor: `fexlswi/regex/` y `regex/` de swi. Hoy
+**un solo directorio `regex/`** con 11 módulos lo comparten ambos binarios.
+`rx_types.ll` tiene la única definición de `%RxInst`/`%RxProgram` y se inyecta
+por concatenación en el build (IR no tiene `include`). Detalles en
+`scripting.md`, §5.
 
 ## ¿Por qué no hay `swi0`?
 
@@ -49,10 +55,11 @@ eliminó: hay un solo `swi` por perfil.
 |---|---|---|
 | `fast` | `-O0`, sin LTO | iterar con símbolos |
 | `opt` | `-Oz` + LTO con `globaldce` | binario mínimo optimizado |
+| `opt-full` | `-Oz` + LTO con `internalize` | binario mínimo, safe |
 | `selfh` | `-Oz` + LTO sin pases extra | build desde fuentes |
 
-Los tres compilan con target `x86_64-linux-musl`. `fexlswi` tiene sus propios
-`opt`/`selfh`, ambos estáticos.
+Los cuatro compilan con target `x86_64-linux-musl` y link dinámico. `fexlswi`
+tiene sus propios `opt`/`selfh`, también musl dinámicos. Ver `BUILD.md`.
 
 ## Sesión
 
