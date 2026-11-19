@@ -161,6 +161,46 @@ skip:
 ; (evita fstat y su struct stat con layout complejo en IR). El fd se cierra
 ; despues del mmap: el mapping sobrevive al cierre (contraintuitivo pero POSIX).
 ; ---------------------------------------------------------------------------
+; ---------------------------------------------------------------------------
+; fsio_open_append / write_fd / close_fd: escritura por chunks, sin
+; materializar el documento entero. O_WRONLY|O_APPEND = 1|1024 = 1025.
+; ---------------------------------------------------------------------------
+define i32 @fsio_open_append(ptr %path) {
+entry:
+  %fd = call i32 @open(ptr %path, i32 1025, i32 420)
+  ret i32 %fd
+}
+
+define i32 @fsio_write_fd(i32 %fd, ptr %data, i64 %len) {
+entry:
+  br label %loop
+loop:
+  %done = phi i64 [ 0, %entry ], [ %new_total, %next ]
+  %finished = icmp uge i64 %done, %len
+  br i1 %finished, label %ok, label %body
+body:
+  %rem = sub i64 %len, %done
+  %p = getelementptr i8, ptr %data, i64 %done
+  %n = call i64 @write(i32 %fd, ptr %p, i64 %rem)
+  %good = icmp sgt i64 %n, 0
+  br i1 %good, label %next, label %fail
+next:
+  %new_total = add i64 %done, %n
+  br label %loop
+ok:
+  ret i32 1
+fail:
+  ret i32 0
+}
+
+define i32 @fsio_close_fd(i32 %fd) {
+entry:
+  %rc = call i32 @close(i32 %fd)
+  %ok = icmp eq i32 %rc, 0
+  %r = zext i1 %ok to i32
+  ret i32 %r
+}
+
 define i32 @fsio_mmap(ptr %path, ptr %out_addr, ptr %out_len) {
 entry:
   %fd = call i32 @open(ptr %path, i32 0, i32 0)

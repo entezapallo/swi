@@ -113,6 +113,8 @@ extern int32_t  memory_load(void *m, const char *path);
 
 /* --- motor del editor (para el selftest) --- */
 extern void    *doc_textbuffer(void *doc);
+extern int64_t  doc_read(void *doc, int64_t off, int64_t len, char *out);
+extern int64_t  doc_length(void *doc);
 
 /* style_id de los spans de formato (fmt_span_*) */
 enum { FMT_NONE=0, FMT_SEARCH=1, FMT_KEYWORD=2,

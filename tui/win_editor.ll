@@ -39,19 +39,17 @@ declare ptr @doc_new()
 declare void @doc_destroy(ptr)
 declare i32 @doc_save(ptr, ptr)
 declare i32 @doc_reindex(ptr)
-declare ptr @doc_textbuffer(ptr)
 declare ptr @doc_lineindex(ptr)
 declare i32 @doc_insert(ptr, i64, ptr, i64)
 declare i32 @doc_delete(ptr, i64, i64)
 declare i32 @doc_undo(ptr)
 declare i32 @doc_redo(ptr)
-declare i64 @tb_length(ptr)
-declare ptr @tb_data(ptr)
 declare i64 @li_line_count(ptr)
 declare i64 @li_line_offset(ptr, i64)
 declare i64 @li_line_length(ptr, i64)
 declare i64 @li_line_for_offset(ptr, i64)
 declare i64 @doc_length(ptr)
+declare i64 @doc_read(ptr, i64, i64, ptr)
 declare i32 @find_in_doc(ptr, ptr, i64, i64, i32, i32, ptr, ptr)
 declare ptr @fmt_create()
 declare void @fmt_destroy(ptr)
@@ -336,8 +334,7 @@ define void @win_editor_set_cursor(ptr %ed, i64 %cursor, i64 %top) {
 entry:
   %dp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %doc = load ptr, ptr %dp
-  %tb = call ptr @doc_textbuffer(ptr %doc)
-  %len = call i64 @tb_length(ptr %tb)
+  %len = call i64 @doc_length(ptr %doc)
   %neg = icmp slt i64 %cursor, 0
   %c0 = select i1 %neg, i64 0, i64 %cursor
   %big = icmp sgt i64 %c0, %len
@@ -537,8 +534,7 @@ define internal void @ew_clamp_cursor(ptr %ed) {
 entry:
   %dp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %doc = load ptr, ptr %dp
-  %tb = call ptr @doc_textbuffer(ptr %doc)
-  %len = call i64 @tb_length(ptr %tb)
+  %len = call i64 @doc_length(ptr %doc)
   %cp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 1
   %cur = load i64, ptr %cp
   %neg = icmp slt i64 %cur, 0
@@ -745,11 +741,13 @@ define internal i64 @ew_word_fwd(ptr %ed, i64 %from, i64 %count) {
 entry:
   %dp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %doc = load ptr, ptr %dp
-  %tb = call ptr @doc_textbuffer(ptr %doc)
-  %data = call ptr @tb_data(ptr %tb)
-  %len = call i64 @tb_length(ptr %tb)
-  %clamp = icmp sgt i64 %from, %len
-  %p0 = select i1 %clamp, i64 %len, i64 %from
+  %total = call i64 @doc_length(ptr %doc)
+  %clampf = icmp sgt i64 %from, %total
+  %base = select i1 %clampf, i64 %total, i64 %from
+  %buf = alloca [4096 x i8]
+  %data = getelementptr [4096 x i8], ptr %buf, i32 0, i32 0
+  %len = call i64 @doc_read(ptr %doc, i64 %base, i64 4096, ptr %data)
+  %p0 = add i64 0, 0
   br label %loop
 loop:
   %p = phi i64 [ %p0, %entry ], [ %pnext, %body ]
@@ -764,16 +762,22 @@ body:
   %nnext = add i64 %n, 1
   br label %loop
 ret_p:
-  ret i64 %p
+  %abs = add i64 %base, %p
+  ret i64 %abs
 }
 
 define internal i64 @ew_word_back(ptr %ed, i64 %from, i64 %count) {
 entry:
   %dp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %doc = load ptr, ptr %dp
-  %tb = call ptr @doc_textbuffer(ptr %doc)
-  %data = call ptr @tb_data(ptr %tb)
-  %p0raw = sub i64 %from, 1
+  %rawbase = sub i64 %from, 4096
+  %negbase = icmp slt i64 %rawbase, 0
+  %base = select i1 %negbase, i64 0, i64 %rawbase
+  %buf = alloca [4096 x i8]
+  %data = getelementptr [4096 x i8], ptr %buf, i32 0, i32 0
+  %len = call i64 @doc_read(ptr %doc, i64 %base, i64 4096, ptr %data)
+  %relraw = sub i64 %from, %base
+  %p0raw = sub i64 %relraw, 1
   %neg = icmp slt i64 %p0raw, 0
   %p0 = select i1 %neg, i64 0, i64 %p0raw
   br label %loop
@@ -790,17 +794,21 @@ body:
   %nnext = add i64 %n, 1
   br label %loop
 ret_p:
-  ret i64 %p
+  %abs = add i64 %base, %p
+  ret i64 %abs
 }
 
 define internal i64 @ew_word_end(ptr %ed, i64 %from, i64 %count) {
 entry:
   %dp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %doc = load ptr, ptr %dp
-  %tb = call ptr @doc_textbuffer(ptr %doc)
-  %data = call ptr @tb_data(ptr %tb)
-  %len = call i64 @tb_length(ptr %tb)
-  %p0raw = add i64 %from, 1
+  %total = call i64 @doc_length(ptr %doc)
+  %clamp2 = icmp sgt i64 %from, %total
+  %base = select i1 %clamp2, i64 %total, i64 %from
+  %buf = alloca [4096 x i8]
+  %data = getelementptr [4096 x i8], ptr %buf, i32 0, i32 0
+  %len = call i64 @doc_read(ptr %doc, i64 %base, i64 4096, ptr %data)
+  %p0raw = add i64 0, 1
   %over = icmp sgt i64 %p0raw, %len
   %p0 = select i1 %over, i64 %len, i64 %p0raw
   br label %loop
@@ -818,7 +826,8 @@ body:
   %nnext = add i64 %n, 1
   br label %loop
 ret_p:
-  ret i64 %p
+  %abs = add i64 %base, %p
+  ret i64 %abs
 }
 
 ; --- movimientos ---
@@ -1039,8 +1048,7 @@ define internal void @ew_delete_char(ptr %ed, i64 %count) {
 entry:
   %dp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %doc = load ptr, ptr %dp
-  %tb = call ptr @doc_textbuffer(ptr %doc)
-  %len = call i64 @tb_length(ptr %tb)
+  %len = call i64 @doc_length(ptr %doc)
   %cp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 1
   %cur = load i64, ptr %cp
   %avail = sub i64 %len, %cur
@@ -1106,10 +1114,10 @@ entry:
   %start = load i64, ptr %s
   %end = load i64, ptr %last_e
   %len = sub i64 %end, %start
-  %tb = call ptr @doc_textbuffer(ptr %doc)
-  %data = call ptr @tb_data(ptr %tb)
-  %from = getelementptr i8, ptr %data, i64 %start
-  call void @ew_set_reg(ptr %ed, ptr %from, i64 %len)
+  %tmp = call ptr @malloc(i64 %len)
+  %got0 = call i64 @doc_read(ptr %doc, i64 %start, i64 %len, ptr %tmp)
+  call void @ew_set_reg(ptr %ed, ptr %tmp, i64 %got0)
+  call void @free(ptr %tmp)
   %is_yank = icmp ne i32 %yank_only, 0
   br i1 %is_yank, label %done, label %delete
 delete:
@@ -1162,9 +1170,9 @@ lenchk:
 go:
   %dp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %doc = load ptr, ptr %dp
-  %tb = call ptr @doc_textbuffer(ptr %doc)
-  %buf = call ptr @tb_data(ptr %tb)
-  %buflen = call i64 @tb_length(ptr %tb)
+  %buflen = call i64 @doc_length(ptr %doc)
+  %buf = call ptr @malloc(i64 %buflen)
+  %got1 = call i64 @doc_read(ptr %doc, i64 0, i64 %buflen, ptr %buf)
   %cp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 1
   %cur = load i64, ptr %cp
   %fwd = icmp ne i32 %forward, 0
@@ -1327,10 +1335,10 @@ operator:
 op_yank_range:
   %docy_p = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %docy = load ptr, ptr %docy_p
-  %tby = call ptr @doc_textbuffer(ptr %docy)
-  %datay = call ptr @tb_data(ptr %tby)
-  %fromy = getelementptr i8, ptr %datay, i64 %lo
-  call void @ew_set_reg(ptr %ed, ptr %fromy, i64 %dellen)
+  %tmpy = call ptr @malloc(i64 %dellen)
+  %goty = call i64 @doc_read(ptr %docy, i64 %lo, i64 %dellen, ptr %tmpy)
+  call void @ew_set_reg(ptr %ed, ptr %tmpy, i64 %goty)
+  call void @free(ptr %tmpy)
   ret i32 1
 op_cut:
   %docp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
@@ -1420,10 +1428,10 @@ visual_op:
 vyank:
   %dp3 = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %doc3 = load ptr, ptr %dp3
-  %tby3 = call ptr @doc_textbuffer(ptr %doc3)
-  %datay3 = call ptr @tb_data(ptr %tby3)
-  %fromy3 = getelementptr i8, ptr %datay3, i64 %vlo
-  call void @ew_set_reg(ptr %ed, ptr %fromy3, i64 %rlen)
+  %tmpy3 = call ptr @malloc(i64 %rlen)
+  %goty3 = call i64 @doc_read(ptr %doc3, i64 %vlo, i64 %rlen, ptr %tmpy3)
+  call void @ew_set_reg(ptr %ed, ptr %tmpy3, i64 %goty3)
+  call void @free(ptr %tmpy3)
   br label %vdone
 vcut:
   %vis_nonempty = icmp sgt i64 %rlen, 0
@@ -1473,8 +1481,6 @@ go:
   %sel_hi = select i1 %ahi5, i64 %anchor, i64 %cur5
   %dp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %doc = load ptr, ptr %dp
-  %tb = call ptr @doc_textbuffer(ptr %doc)
-  %data = call ptr @tb_data(ptr %tb)
   %li = call ptr @doc_lineindex(ptr %doc)
   %nlines = call i64 @li_line_count(ptr %li)
   %tlp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 3
@@ -1502,19 +1508,19 @@ check_wrap:
   br i1 %wraps, label %draw_wrap1, label %draw_trunc
 
 draw_simple:
-  call void @draw_span(ptr %data, i64 %off, i64 %len, i32 %x, i32 %y, i32 %row, i32 %w, ptr %hf, i32 %visual, i64 %sel_lo, i64 %sel_hi)
+  call void @draw_span(ptr %doc, i64 %off, i64 %len, i32 %x, i32 %y, i32 %row, i32 %w, ptr %hf, i32 %visual, i64 %sel_lo, i64 %sel_hi)
   %rs1 = add i32 %row, 1
   %ln1 = add i64 %line, 1
   br label %next_line_assign
 draw_wrap1:
-  call void @draw_span(ptr %data, i64 %off, i64 %wi64, i32 %x, i32 %y, i32 %row, i32 %w, ptr %hf, i32 %visual, i64 %sel_lo, i64 %sel_hi)
+  call void @draw_span(ptr %doc, i64 %off, i64 %wi64, i32 %x, i32 %y, i32 %row, i32 %w, ptr %hf, i32 %visual, i64 %sel_lo, i64 %sel_hi)
   %rs2 = add i32 %row, 1
   %room = icmp slt i32 %rs2, %h
   br i1 %room, label %draw_wrap2, label %wrap_done
 draw_wrap2:
   %rest = sub i64 %len, %wi64
   %off2 = add i64 %off, %wi64
-  call void @draw_span(ptr %data, i64 %off2, i64 %rest, i32 %x, i32 %y, i32 %rs2, i32 %w, ptr %hf, i32 %visual, i64 %sel_lo, i64 %sel_hi)
+  call void @draw_span(ptr %doc, i64 %off2, i64 %rest, i32 %x, i32 %y, i32 %rs2, i32 %w, ptr %hf, i32 %visual, i64 %sel_lo, i64 %sel_hi)
   %rs2b = add i32 %rs2, 1
   br label %wrap_done
 wrap_done:
@@ -1530,7 +1536,7 @@ draw_trunc:
   %remsmall = icmp slt i64 %rem, %wi64
   %shown = select i1 %remsmall, i64 %rem, i64 %wi64
   %off3 = add i64 %off, %start
-  call void @draw_span(ptr %data, i64 %off3, i64 %shown, i32 %x, i32 %y, i32 %row, i32 %w, ptr %hf, i32 %visual, i64 %sel_lo, i64 %sel_hi)
+  call void @draw_span(ptr %doc, i64 %off3, i64 %shown, i32 %x, i32 %y, i32 %row, i32 %w, ptr %hf, i32 %visual, i64 %sel_lo, i64 %sel_hi)
   %rs3 = add i32 %row, 1
   %ln3 = add i64 %line, 1
   br label %next_line_assign
@@ -1593,8 +1599,9 @@ cur_draw:
 cur_space:
   br label %cur_cell
 cur_char:
-  %cur_cp = getelementptr i8, ptr %data, i64 %cur5
-  %cur_b = load i8, ptr %cur_cp
+  %cur_buf = alloca [1 x i8]
+  %cur_got = call i64 @doc_read(ptr %doc, i64 %cur5, i64 1, ptr %cur_buf)
+  %cur_b = load i8, ptr %cur_buf
   %cur_ch = zext i8 %cur_b to i32
   br label %cur_cell
 cur_cell:
@@ -1609,9 +1616,17 @@ done_small:
   ret void
 }
 
-define internal void @draw_span(ptr %data, i64 %off, i64 %len,
+define internal void @draw_span(ptr %doc, i64 %off, i64 %len,
                                  i32 %x, i32 %y, i32 %row, i32 %w, ptr %hf, i32 %visual, i64 %sel_lo, i64 %sel_hi) {
 entry:
+  ; solo se pintan columnas visibles: leer como maximo %w bytes del Document
+  %buf = alloca [256 x i8]
+  %bp = getelementptr [256 x i8], ptr %buf, i32 0, i32 0
+  %wi0 = sext i32 %w to i64
+  %want = sub i64 %len, 0
+  %cap = icmp sgt i64 %want, 256
+  %use = select i1 %cap, i64 256, i64 %want
+  %got = call i64 @doc_read(ptr %doc, i64 %off, i64 %use, ptr %bp)
   br label %loop
 loop:
   %i = phi i64 [ 0, %entry ], [ %inext, %body ]
@@ -1623,8 +1638,10 @@ loop:
   br i1 %both, label %body, label %pad
 body:
   %pos = add i64 %off, %i
-  %cp = getelementptr i8, ptr %data, i64 %pos
-  %byte = load i8, ptr %cp
+  %inbuf = icmp slt i64 %i, %got
+  %cp = getelementptr i8, ptr %bp, i64 %i
+  %b0 = load i8, ptr %cp
+  %byte = select i1 %inbuf, i8 %b0, i8 32
   %ch = zext i8 %byte to i32
   %rx = add i32 %x, %i32v
   %ry = add i32 %y, %row

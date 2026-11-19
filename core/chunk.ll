@@ -16,20 +16,23 @@
 ;
 ; No usa `switch` -> no necesita -relocation-model=pic.
 ;
-; %Chunk = { ptr tb, i64 orig_start, i64 orig_len, i64 delta,
-;            i32 dirty, ptr next }   ; 48 bytes (6 campos, alineado)
+; %Chunk = { ptr tb, ptr src, i64 orig_start, i64 orig_len, i64 delta,
+;            i32 dirty, ptr next }
+;   tb  = TextBuffer privado (solo si dirty=1; si no, null)
+;   src = puntero al slice del mmap (zero-copy, solo si dirty=0)
 
-%Chunk = type { ptr, i64, i64, i64, i32, ptr }
+%Chunk = type { ptr, ptr, i64, i64, i64, i32, ptr }
 
 declare ptr @malloc(i64)
 declare void @free(ptr)
 
 ;tamano real del chunk (orig_len + delta)
+; Campos: 0=tb 1=src 2=orig_start 3=orig_len 4=delta 5=dirty 6=next
 define internal i64 @chunk_current_len(ptr %c) {
 entry:
-  %lp = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 2
+  %lp = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 3
   %orig = load i64, ptr %lp
-  %dp = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 3
+  %dp = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 4
   %delta = load i64, ptr %dp
   %cur = add i64 %orig, %delta
   ret i64 %cur
@@ -37,7 +40,7 @@ entry:
 
 define ptr @chunk_new(ptr %tb, i64 %orig_start, i64 %orig_len) {
 entry:
-  %c = call ptr @malloc(i64 48)
+  %c = call ptr @malloc(i64 56)
   %n = icmp eq ptr %c, null
   br i1 %n, label %fail, label %init
 fail:
@@ -45,24 +48,78 @@ fail:
 init:
   %tb_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 0
   store ptr %tb, ptr %tb_p
-  %s_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 1
+  %src_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 1
+  store ptr null, ptr %src_p
+  %s_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 2
   store i64 %orig_start, ptr %s_p
-  %l_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 2
+  %l_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 3
   store i64 %orig_len, ptr %l_p
-  %d_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 3
+  %d_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 4
   store i64 0, ptr %d_p
-  %di_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 4
-  store i32 0, ptr %di_p
-  %nx_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 5
+  %di_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 5
+  store i32 1, ptr %di_p
+  %nx_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 6
   store ptr null, ptr %nx_p
   ret ptr %c
 }
 
+; chunk_new_mmap: chunk limpio que apunta a un slice del mmap (zero-copy).
+define ptr @chunk_new_mmap(ptr %src, i64 %orig_start, i64 %orig_len) {
+entry:
+  %c = call ptr @malloc(i64 56)
+  %n = icmp eq ptr %c, null
+  br i1 %n, label %fail, label %init
+fail:
+  ret ptr null
+init:
+  %tb_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 0
+  store ptr null, ptr %tb_p
+  %src_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 1
+  store ptr %src, ptr %src_p
+  %s_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 2
+  store i64 %orig_start, ptr %s_p
+  %l_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 3
+  store i64 %orig_len, ptr %l_p
+  %d_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 4
+  store i64 0, ptr %d_p
+  %di_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 5
+  store i32 0, ptr %di_p
+  %nx_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 6
+  store ptr null, ptr %nx_p
+  ret ptr %c
+}
+
+define void @chunk_set_tb(ptr %c, ptr %tb) {
+entry:
+  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 0
+  store ptr %tb, ptr %p
+  %d = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 5
+  store i32 1, ptr %d
+  ret void
+}
+
+define ptr @chunk_src(ptr %c) {
+entry:
+  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 1
+  %v = load ptr, ptr %p
+  ret ptr %v
+}
+
 define void @chunk_destroy(ptr %c) {
 entry:
+  %dirty = call i32 @chunk_is_dirty(ptr %c)
+  %is = icmp ne i32 %dirty, 0
+  br i1 %is, label %with_tb, label %free_only
+with_tb:
+  %tb = call ptr @chunk_tb(ptr %c)
+  call void @tb_destroy(ptr %tb)
+  br label %free_only
+free_only:
   call void @free(ptr %c)
   ret void
 }
+
+declare void @tb_destroy(ptr)
 
 ; --- getters / setters ---
 
@@ -75,35 +132,35 @@ entry:
 
 define i64 @chunk_orig_start(ptr %c) {
 entry:
-  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 1
+  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 2
   %v = load i64, ptr %p
   ret i64 %v
 }
 
 define i64 @chunk_orig_len(ptr %c) {
 entry:
-  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 2
+  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 3
   %v = load i64, ptr %p
   ret i64 %v
 }
 
 define i64 @chunk_delta(ptr %c) {
 entry:
-  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 3
+  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 4
   %v = load i64, ptr %p
   ret i64 %v
 }
 
 define i32 @chunk_is_dirty(ptr %c) {
 entry:
-  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 4
+  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 5
   %v = load i32, ptr %p
   ret i32 %v
 }
 
 define ptr @chunk_next(ptr %c) {
 entry:
-  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 5
+  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 6
   %v = load ptr, ptr %p
   ret ptr %v
 }
@@ -111,19 +168,26 @@ entry:
 ; fija el tamano actual del chunk: delta = len - orig_len, y marca sucio.
 define void @chunk_set_len(ptr %c, i64 %len) {
 entry:
-  %lp = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 2
+  %lp = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 3
   %orig = load i64, ptr %lp
   %d = sub i64 %len, %orig
-  %dp = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 3
+  %dp = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 4
   store i64 %d, ptr %dp
-  %dip = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 4
+  %dip = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 5
   store i32 1, ptr %dip
+  ret void
+}
+
+define void @chunk_set_delta(ptr %c, i64 %delta) {
+entry:
+  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 4
+  store i64 %delta, ptr %p
   ret void
 }
 
 define void @chunk_set_next(ptr %c, ptr %next) {
 entry:
-  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 5
+  %p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 6
   store ptr %next, ptr %p
   ret void
 }
@@ -224,7 +288,7 @@ loop:
 body:
   %start = call i64 @chunk_orig_start(ptr %c)
   %olen = call i64 @chunk_orig_len(ptr %c)
-  %d_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 3
+  %d_p = getelementptr inbounds %Chunk, ptr %c, i32 0, i32 4
   %delta = load i64, ptr %d_p
   %clen = call i64 @chunk_current_len(ptr %c)
   %a = load i64, ptr %acc

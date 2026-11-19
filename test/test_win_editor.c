@@ -38,9 +38,10 @@ static int step(void *ed, int kind, int64_t a, int64_t b, int64_t c)
 
 static const char *text(void *ed, int64_t *len)
 {
-    void *tb = doc_textbuffer(win_editor_doc(ed));
-    *len = tb_length(tb);
-    return tb_data(tb);
+    static char buf[16384];
+    void *doc = win_editor_doc(ed);
+    *len = doc_read(doc, 0, (int64_t)sizeof(buf), buf);
+    return buf;
 }
 
 int main(void)

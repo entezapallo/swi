@@ -228,16 +228,20 @@ static void fmt_send(void *ed)
 {
     UiFrame f;
     FILE *fp;
-    char *data;
-    int64_t len, i;
+    char buf[4096];
+    void *doc = win_editor_doc(ed);
+    int64_t len, off, got, i;
 
     if (!fexl_ui_alive()) return;
 
-    data = tb_data(doc_textbuffer(win_editor_doc(ed)));
-    len = tb_length(doc_textbuffer(win_editor_doc(ed)));
     fp = fopen(SWI_FMT_FILE, "wb");
     if (fp == NULL) return;
-    if (data != NULL && len > 0) fwrite(data, 1, (size_t)len, fp);
+    len = doc_length(doc);
+    for (off = 0; off < len; off += got) {
+        got = doc_read(doc, off, (int64_t)sizeof(buf), buf);
+        if (got <= 0) break;
+        fwrite(buf, 1, (size_t)got, fp);
+    }
     fclose(fp);
 
     memset(&f, 0, sizeof(f));
@@ -603,7 +607,7 @@ static int selftest(void)
     const char *path = "/tmp/swi_selftest.txt";
     FILE *f = fopen(path, "wb");
     void *st, *canvas, *ed, *console;
-    char *data;
+    char buf[32];
     int64_t len;
 
     if (f == NULL) return 1;
@@ -633,19 +637,19 @@ static int selftest(void)
     send_event(st, console, ed, IN_EV_CHAR, 0, 'i', 0);
     SELF_CHECK(state_mode(st) == 1, "i entra a INSERT");
     send_event(st, console, ed, IN_EV_CHAR, 0, 'X', 0);
-    data = tb_data(doc_textbuffer(win_editor_doc(ed)));
-    len = tb_length(doc_textbuffer(win_editor_doc(ed)));
-    SELF_CHECK(len == 12 && data[0] == 'X', "INSERT 'X' al principio");
+    len = doc_length(win_editor_doc(ed));
+    doc_read(win_editor_doc(ed), 0, 1, buf);
+    SELF_CHECK(len == 12 && buf[0] == 'X', "INSERT 'X' al principio");
     send_event(st, console, ed, IN_EV_KEY, IN_KEY_ESC, 0, 0);
     SELF_CHECK(state_mode(st) == 0, "Esc vuelve a NORMAL");
     send_event(st, console, ed, IN_EV_CHAR, 0, '0', 0);
     SELF_CHECK(win_editor_cursor(ed) == 0, "0 -> inicio de linea");
     send_event(st, console, ed, IN_EV_CHAR, 0, 'x', 0);
-    data = tb_data(doc_textbuffer(win_editor_doc(ed)));
-    SELF_CHECK(data[0] == 'h', "x borra el caracter bajo el cursor");
+    doc_read(win_editor_doc(ed), 0, 1, buf);
+    SELF_CHECK(buf[0] == 'h', "x borra el caracter bajo el cursor");
     send_event(st, console, ed, IN_EV_CHAR, 0, 'u', 0);
-    data = tb_data(doc_textbuffer(win_editor_doc(ed)));
-    SELF_CHECK(data[0] == 'X', "u deshace la borradura");
+    doc_read(win_editor_doc(ed), 0, 1, buf);
+    SELF_CHECK(buf[0] == 'X', "u deshace la borradura");
     send_event(st, console, ed, IN_EV_CHAR, 0, '/', 0);
     send_event(st, console, ed, IN_EV_CHAR, 0, 'm', 0);
     send_event(st, console, ed, IN_EV_CHAR, 0, 'u', 0);
@@ -658,10 +662,10 @@ static int selftest(void)
     SELF_CHECK(win_editor_cursor(ed) == 6, "n con un solo match hace wrap al mismo offset");
     send_event(st, console, ed, IN_EV_CHAR, 0, 'd', 0);
     send_event(st, console, ed, IN_EV_CHAR, 0, 'd', 0);
-    len = tb_length(doc_textbuffer(win_editor_doc(ed)));
+    len = doc_length(win_editor_doc(ed));
     SELF_CHECK(len == 6, "dd borra la linea 'mundo' (quedan 6 bytes)");
     send_event(st, console, ed, IN_EV_CHAR, 0, 'p', 0);
-    len = tb_length(doc_textbuffer(win_editor_doc(ed)));
+    len = doc_length(win_editor_doc(ed));
     SELF_CHECK(len == 12, "p restaura la linea desde el registro");
     printf("  %d ok, %d fail\n", g_pass, g_fail);
     console_destroy(console); canvas_destroy(canvas);

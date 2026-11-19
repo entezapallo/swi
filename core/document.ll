@@ -1,20 +1,18 @@
-; core/document.ll — Document sobre chunks (Etapa C).
+; core/document.ll — Document lazy sobre chunks + mmap (Etapa D, pragmatica).
 ;
-; Un Document tiene:
-;   - un TextBuffer MAESTRO con el contenido completo (compatibilidad: todas
-;     las ediciones/undo/redo/li_rebuild siguen operando sobre el, y los tests
-;     existentes no se rompen);
-;   - una lista de CHUNKS construida sobre un mmap privado del archivo, con
-;     doc_read()/doc_length() como nueva interfaz de contenido.
+; - doc_load NO lee el archivo completo: solo lo mapea y crea chunks que
+;   apuntan al mmap (zero-copy, dirty=0). El TextBuffer maestro queda VACIO.
+; - doc_read() lee desde los chunks: los limpios desde el mmap, los sucios
+;   desde su TextBuffer privado (copy-on-write al editar).
+; - doc_insert/doc_delete editan SOLO el chunk tocado (COW), ajustan su delta
+;   y el total_len. No reconstruyen todos los chunks.
+; - doc_save() escribe chunk por chunk (sin concatenar todo en un buffer).
+; - li_rebuild_doc() ya lee via doc_read, por lo que el indice no materializa.
 ;
-; ESTADO TRANSITORIO (a resolver en Etapa D): el maestro y los chunks tienen
-; cada uno su propia copia del contenido, y las ediciones van al maestro.
-; La Etapa D migrara li_rebuild y win_editor a doc_read y sacara la copia
-; duplicada. Por ahora el objetivo es que el Document *soporte* chunks reales.
-;
-; El índice de líneas se auto-construye la primera vez dentro de doc_load.
-; Después, las actualizaciones son manuales via doc_reindex (gui/ decide).
-; Undo/redo tampoco auto-reindexa, mismo criterio.
+; Deuda aceptada (no perfecto): find_in_doc y doc_replace_all materializan el
+; documento; el maestro se usa como caché de compatibilidad para llamadores
+; que todavia piden tb_data(doc_textbuffer(doc)); los chunks vacios no se
+; compactan; doc_reindex sigue siendo O(n) por edicion.
 
 %Document = type { ptr, ptr, ptr, ptr, i64, ptr, i64, i64 }
 ; { TextBuffer* maestro, LineIndex*, History*,
@@ -52,7 +50,10 @@ declare void @free(ptr)
 declare ptr @memcpy(ptr, ptr, i64)
 
 declare ptr @chunk_new(ptr, i64, i64)
+declare ptr @chunk_new_mmap(ptr, i64, i64)
 declare void @chunk_destroy(ptr)
+declare ptr @chunk_src(ptr)
+declare void @chunk_set_tb(ptr, ptr)
 declare ptr @chunk_next(ptr)
 declare i64 @chunk_orig_len(ptr)
 declare i64 @chunk_delta(ptr)
@@ -61,6 +62,7 @@ declare ptr @chunk_tb(ptr)
 declare void @chunk_set_len(ptr, i64)
 declare void @chunk_set_next(ptr, ptr)
 declare i64 @chunk_to_actual(ptr, i64)
+declare i64 @chunk_total(ptr)
 
 declare i32 @replace_all(ptr, i64, ptr, ptr, i64, i64, i64, i64, i64, ptr, ptr, ptr, ptr, ptr)
 declare void @replace_all_free_results(ptr, ptr, ptr, ptr, i64)
@@ -70,10 +72,8 @@ declare i1 @find_bytes_match(ptr, ptr, i64, i32)
 %History = type { ptr, ptr }
 
 ; ---------------------------------------------------------------------------
-; doc_build_chunks: sobre un mmap de %len bytes, crea chunks de 10000 y los
-; enlaza en %doc. Cada chunk tiene su propio TextBuffer con una COPIA de su
-; porcion (todavia no zero-copy: la Etapa D lo optimizara). No toca el
-; TextBuffer maestro ni el LineIndex.
+; doc_build_chunks: sobre un mmap de %len bytes, crea chunks de 10000 ZERO-COPY
+; (apuntan al mmap, TextBuffer=null, dirty=0) y los enlaza en %doc.
 ; ---------------------------------------------------------------------------
 define internal void @doc_build_chunks(ptr %doc, ptr %addr, i64 %len) {
 entry:
@@ -95,9 +95,7 @@ body:
   %small = icmp slt i64 %rem, 10000
   %clen = select i1 %small, i64 %rem, i64 10000
   %src = getelementptr i8, ptr %addr, i64 %o
-  %tb = call ptr @tb_create()
-  %ins = call i32 @tb_insert(ptr %tb, i64 0, ptr %src, i64 %clen)
-  %c = call ptr @chunk_new(ptr %tb, i64 %o, i64 %clen)
+  %c = call ptr @chunk_new_mmap(ptr %src, i64 %o, i64 %clen)
   %t = load ptr, ptr %tail
   %tnull = icmp eq ptr %t, null
   br i1 %tnull, label %first, label %append
@@ -168,6 +166,14 @@ init:
   store i64 0, ptr %f6
   %f7 = getelementptr %Document, ptr %doc, i32 0, i32 7
   store i64 0, ptr %f7
+  ; un chunk vacío y sucio con su PROPIO TB (no compartir el maestro:
+  ; doc_destroy libera ambos y eso seria doble-free)
+  %ctb0 = call ptr @tb_create()
+  %c0 = call ptr @chunk_new(ptr %ctb0, i64 0, i64 0)
+  %hp0 = getelementptr %Document, ptr %doc, i32 0, i32 3
+  store ptr %c0, ptr %hp0
+  %cnp0 = getelementptr %Document, ptr %doc, i32 0, i32 4
+  store i64 1, ptr %cnp0
   ret ptr %doc
 fail_alloc:
   call void @hist_destroy(ptr %hist)
@@ -191,26 +197,13 @@ entry:
   br i1 %read_ok_b, label %make_buffer, label %fail_noalloc
 
 make_buffer:
-  %tb = call ptr @tb_create()
-  %len = load i64, ptr %out_len
-  %is_empty = icmp eq i64 %len, 0
-  br i1 %is_empty, label %make_index, label %do_insert
-
-do_insert:
-  %data = load ptr, ptr %out_data
-  %ins_ok = call i32 @tb_insert(ptr %tb, i64 0, ptr %data, i64 %len)
-  %ins_ok_b = icmp eq i32 %ins_ok, 1
-  br i1 %ins_ok_b, label %make_index, label %fail_after_tb
-
-make_index:
+  %tb = call ptr @tb_create()          ; maestro VACIO (compatibilidad)
   %fdata = load ptr, ptr %out_data
   call void @fsio_free_buffer(ptr %fdata)
-  %li = call ptr @li_create()
-  %rebuild_ok = call i32 @li_rebuild(ptr %li, ptr %tb)
-  %rebuild_ok_b = icmp eq i32 %rebuild_ok, 1
-  br i1 %rebuild_ok_b, label %make_hist, label %fail_after_index
+  br label %make_index
 
-make_hist:
+make_index:
+  %li = call ptr @li_create()
   %hist = call ptr @hist_create()
   br label %make_doc
 
@@ -244,6 +237,11 @@ init_chunks_empty:
   store ptr null, ptr %hp0
   %cnp0 = getelementptr %Document, ptr %doc, i32 0, i32 4
   store i64 0, ptr %cnp0
+  ; archivo vacío: un chunk vacío sucio con su propio TB
+  %ctbe = call ptr @tb_create()
+  %cempty = call ptr @chunk_new(ptr %ctbe, i64 0, i64 0)
+  store ptr %cempty, ptr %hp0
+  store i64 1, ptr %cnp0
   br label %store_map
 store_map:
   %ma_f = load ptr, ptr %ma
@@ -253,8 +251,9 @@ store_map:
   %maplen_p = getelementptr %Document, ptr %doc, i32 0, i32 6
   store i64 %ml_f, ptr %maplen_p
   %tot_p = getelementptr %Document, ptr %doc, i32 0, i32 7
-  %tot = call i64 @tb_length(ptr %tb)
-  store i64 %tot, ptr %tot_p
+  store i64 %ml_f, ptr %tot_p
+  ; indice sobre el contenido del Document (lee via doc_read, no materializa)
+  %rok = call i32 @li_rebuild_doc(ptr %li, ptr %doc)
   ret ptr %doc
 
 fail_after_index:
@@ -272,63 +271,63 @@ fail_noalloc:
   ret ptr null
 }
 
-; doc_save: escribe el documento a un archivo nuevo recorriendo los chunks
-; (en vez del TextBuffer maestro). Con 1 chunk usa el maestro directo.
-; Cada chunk se escribe desde su TextBuffer (que doc_sync_len mantiene
-; sincronizado). Preparado para el guardado selectivo limpio/sucio: hoy
-; todos los chunks se marcan sucios, pero la escritura ya es por chunks.
+; doc_save: escribe chunk por chunk SIN concatenar el documento en memoria.
+; Cada chunk limpio se lee directo del mmap; el sucio desde su TextBuffer.
 define i32 @doc_save(ptr %doc, ptr %path) {
 entry:
   ; crear/vaciar archivo destino
   %init = call i32 @fsio_write_file(ptr %path, ptr null, i64 0)
-  %ncp = getelementptr %Document, ptr %doc, i32 0, i32 4
-  %nc = load i64, ptr %ncp
-  %one = icmp eq i64 %nc, 1
-  br i1 %one, label %single, label %multi
-single:
-  %tbp = getelementptr %Document, ptr %doc, i32 0, i32 0
-  %tb = load ptr, ptr %tbp
-  %len = call i64 @tb_length(ptr %tb)
-  %data = call ptr @tb_data(ptr %tb)
-  %ok1 = call i32 @fsio_write_file(ptr %path, ptr %data, i64 %len)
-  ret i32 %ok1
-multi:
-  ; concatenar todos los chunks en un buffer temporal y escribir de una vez
-  %total = call i64 @doc_length(ptr %doc)
-  %buf = call ptr @malloc(i64 %total)
-  %bn = icmp eq ptr %buf, null
-  br i1 %bn, label %fail, label %fill
+  %init_ok = icmp eq i32 %init, 1
+  br i1 %init_ok, label %open, label %fail
+open:
+  %fd = call i32 @fsio_open_append(ptr %path)
+  %fd_ok = icmp sge i32 %fd, 0
+  br i1 %fd_ok, label %fill, label %fail
 fill:
   %headp = getelementptr %Document, ptr %doc, i32 0, i32 3
   %head = load ptr, ptr %headp
-  %off = alloca i64
-  store i64 0, ptr %off
   %cur = alloca ptr
   store ptr %head, ptr %cur
   br label %loop
 loop:
   %c = load ptr, ptr %cur
   %cn = icmp eq ptr %c, null
-  br i1 %cn, label %write, label %body
+  br i1 %cn, label %write_done, label %body
 body:
+  %dirty = call i32 @chunk_is_dirty(ptr %c)
+  %is = icmp ne i32 %dirty, 0
+  br i1 %is, label %from_tb, label %from_src
+from_tb:
   %ctb = call ptr @chunk_tb(ptr %c)
   %clen = call i64 @tb_length(ptr %ctb)
   %cdata = call ptr @tb_data(ptr %ctb)
-  %o = load i64, ptr %off
-  %dst = getelementptr i8, ptr %buf, i64 %o
-  %r = call ptr @memcpy(ptr %dst, ptr %cdata, i64 %clen)
-  %o1 = add i64 %o, %clen
-  store i64 %o1, ptr %off
+  br label %write_chunk
+from_src:
+  %src = call ptr @chunk_src(ptr %c)
+  %olen = call i64 @chunk_orig_len(ptr %c)
+  %d = call i64 @chunk_delta(ptr %c)
+  %clen2 = add i64 %olen, %d
+  br label %write_chunk_src
+write_chunk:
+  %okc = call i32 @fsio_write_fd(i32 %fd, ptr %cdata, i64 %clen)
+  br label %advance
+write_chunk_src:
+  %okc2 = call i32 @fsio_write_fd(i32 %fd, ptr %src, i64 %clen2)
+  br label %advance
+advance:
   %nx = call ptr @chunk_next(ptr %c)
   store ptr %nx, ptr %cur
   br label %loop
-write:
-  %ok2 = call i32 @fsio_write_file(ptr %path, ptr %buf, i64 %total)
-  call void @free(ptr %buf)
-  ret i32 %ok2
+write_done:
+  %close = call i32 @fsio_close_fd(i32 %fd)
+  ret i32 1
 fail:
   ret i32 0
 }
+
+declare i32 @fsio_open_append(ptr)
+declare i32 @fsio_write_fd(i32, ptr, i64)
+declare i32 @fsio_close_fd(i32)
 
 ; doc_length: largo total del documento (offset actual).
 define i64 @doc_length(ptr %doc) {
@@ -345,69 +344,96 @@ entry:
 ; Por ahora garantiza que doc_read (que lee chunks) vea los edits.
 define internal void @doc_sync_len(ptr %doc) {
 entry:
-  %tbp = getelementptr %Document, ptr %doc, i32 0, i32 0
-  %tb = load ptr, ptr %tbp
-  %len = call i64 @tb_length(ptr %tb)
-  %lp = getelementptr %Document, ptr %doc, i32 0, i32 7
-  store i64 %len, ptr %lp
-
-  ; destruir chunks viejos
+  ; total_len = suma de longitudes actuales de los chunks. O(#chunks),
+  ; pero NO destruye ni reconstruye: las ediciones ya ajustaron cada delta.
   %hp = getelementptr %Document, ptr %doc, i32 0, i32 3
   %head = load ptr, ptr %hp
-  br label %destroy_loop
-destroy_loop:
-  %c = phi ptr [ %head, %entry ], [ %cnx, %destroy_one ]
-  %isnull = icmp eq ptr %c, null
-  br i1 %isnull, label %rebuild, label %destroy_one
-destroy_one:
-  %ctb = call ptr @chunk_tb(ptr %c)
-  call void @tb_destroy(ptr %ctb)
-  %cnx = call ptr @chunk_next(ptr %c)
-  call void @chunk_destroy(ptr %c)
-  br label %destroy_loop
-
-rebuild:
-  ; reconstruir desde el maestro si hay contenido
-  %has = icmp sgt i64 %len, 0
-  br i1 %has, label %do_rebuild, label %no_chunks
-do_rebuild:
-  %data = call ptr @tb_data(ptr %tb)
-  call void @doc_build_chunks(ptr %doc, ptr %data, i64 %len)
+  %total = call i64 @chunk_total(ptr %head)
+  %lp = getelementptr %Document, ptr %doc, i32 0, i32 7
+  store i64 %total, ptr %lp
   ret void
-no_chunks:
-  store ptr null, ptr %hp
-  %cnp = getelementptr %Document, ptr %doc, i32 0, i32 4
-  store i64 0, ptr %cnp
+}
+
+; doc_ensure_cow: si el chunk es limpio (apunta al mmap), copia su porcion a
+; un TextBuffer privado y lo marca sucio. Los editables posteriores van ahi.
+define internal ptr @doc_ensure_cow(ptr %c) {
+entry:
+  %dirty = call i32 @chunk_is_dirty(ptr %c)
+  %is = icmp ne i32 %dirty, 0
+  br i1 %is, label %have, label %copy
+have:
+  %tb0 = call ptr @chunk_tb(ptr %c)
+  ret ptr %tb0
+copy:
+  %src = call ptr @chunk_src(ptr %c)
+  %olen = call i64 @chunk_orig_len(ptr %c)
+  %d = call i64 @chunk_delta(ptr %c)
+  %clen = add i64 %olen, %d
+  %tb = call ptr @tb_create()
+  %ok = call i32 @tb_insert(ptr %tb, i64 0, ptr %src, i64 %clen)
+  call void @chunk_set_tb(ptr %c, ptr %tb)
+  ret ptr %tb
+}
+
+; doc_locate: encuentra el chunk que contiene el offset ACTUAL %pos.
+; Escribe en %out_chunk, %out_local (offset dentro del chunk) y %out_acc
+; (offset actual donde empieza el chunk). Si %pos == total, devuelve el
+; ultimo chunk con local == su longitud.
+define internal void @doc_locate(ptr %doc, i64 %pos,
+                                 ptr %out_chunk, ptr %out_local, ptr %out_acc) {
+entry:
+  %hp = getelementptr %Document, ptr %doc, i32 0, i32 3
+  %head = load ptr, ptr %hp
+  %acc = alloca i64
+  store i64 0, ptr %acc
+  %cur = alloca ptr
+  store ptr %head, ptr %cur
+  br label %loop
+loop:
+  %c = load ptr, ptr %cur
+  %null = icmp eq ptr %c, null
+  br i1 %null, label %notfound, label %body
+body:
+  %olen = call i64 @chunk_orig_len(ptr %c)
+  %d = call i64 @chunk_delta(ptr %c)
+  %clen = add i64 %olen, %d
+  %a = load i64, ptr %acc
+  %end = add i64 %a, %clen
+  %nx = call ptr @chunk_next(ptr %c)
+  %last = icmp eq ptr %nx, null
+  %ge = icmp sge i64 %pos, %a
+  %lt = icmp slt i64 %pos, %end
+  %inside = and i1 %ge, %lt
+  %at_end = icmp eq i64 %pos, %end
+  %take = or i1 %inside, %at_end
+  br i1 %take, label %found, label %advance
+advance:
+  store i64 %end, ptr %acc
+  store ptr %nx, ptr %cur
+  br label %loop
+found:
+  %local0 = sub i64 %pos, %a
+  store ptr %c, ptr %out_chunk
+  store i64 %local0, ptr %out_local
+  store i64 %a, ptr %out_acc
+  ret void
+notfound:
+  store ptr null, ptr %out_chunk
+  store i64 0, ptr %out_local
+  store i64 0, ptr %out_acc
   ret void
 }
 
 ; ---------------------------------------------------------------------------
 ; doc_read: copia hasta %len bytes desde el offset actual %off hasta %out.
-; Devuelve la cantidad de bytes copiados (puede ser menor si se pasa del fin).
-; Con 1 chunk: memcpy directo. Con multi-chunk: recorre la lista buscando el
-; chunk que contiene cada posicion y copia el tramo correspondiente.
+; Los chunks limpios se leen directo del mmap; los sucios desde su TB privado.
 ; ---------------------------------------------------------------------------
 define i64 @doc_read(ptr %doc, i64 %off, i64 %len, ptr %out) {
 entry:
-  %ncp = getelementptr %Document, ptr %doc, i32 0, i32 4
-  %nc = load i64, ptr %ncp
-  %one = icmp eq i64 %nc, 1
   %zero_len = icmp sle i64 %len, 0
-  %simple = or i1 %one, %zero_len
-  br i1 %simple, label %single, label %multi_init
-single:
-  %total = call i64 @doc_length(ptr %doc)
-  %avail = sub i64 %total, %off
-  %avail_pos = icmp sgt i64 %avail, 0
-  %use = select i1 %avail_pos, i64 %avail, i64 0
-  %len_lt = icmp slt i64 %len, %use
-  %take = select i1 %len_lt, i64 %len, i64 %use
-  %tb0p = getelementptr %Document, ptr %doc, i32 0, i32 0
-  %tb0 = load ptr, ptr %tb0p
-  %data0 = call ptr @tb_data(ptr %tb0)
-  %src0 = getelementptr i8, ptr %data0, i64 %off
-  %r = call ptr @memcpy(ptr %out, ptr %src0, i64 %take)
-  ret i64 %take
+  br i1 %zero_len, label %zero, label %multi_init
+zero:
+  ret i64 0
 multi_init:
   %done = alloca i64
   store i64 0, ptr %done
@@ -450,8 +476,18 @@ do_copy:
   %want = sub i64 %len, %d
   %rem_lt = icmp slt i64 %rem, %want
   %take_m = select i1 %rem_lt, i64 %rem, i64 %want
+  %dirty_c = call i32 @chunk_is_dirty(ptr %c)
+  %is_d = icmp ne i32 %dirty_c, 0
+  br i1 %is_d, label %from_tb, label %from_mmap
+from_tb:
   %tb_c = call ptr @chunk_tb(ptr %c)
-  %data_c = call ptr @tb_data(ptr %tb_c)
+  %data_tb = call ptr @tb_data(ptr %tb_c)
+  br label %have_src
+from_mmap:
+  %data_mm = call ptr @chunk_src(ptr %c)
+  br label %have_src
+have_src:
+  %data_c = phi ptr [ %data_tb, %from_tb ], [ %data_mm, %from_mmap ]
   %srcc = getelementptr i8, ptr %data_c, i64 %local
   %dstc = getelementptr i8, ptr %out, i64 %d
   %rc = call ptr @memcpy(ptr %dstc, ptr %srcc, i64 %take_m)
@@ -629,8 +665,7 @@ chunk_loop:
   %isnull = icmp eq ptr %c, null
   br i1 %isnull, label %destroy_chunks_done, label %destroy_one
 destroy_one:
-  %ctb = call ptr @chunk_tb(ptr %c)
-  call void @tb_destroy(ptr %ctb)
+  ; chunk_destroy ya libera el TB solo si está sucio
   %cnx = call ptr @chunk_next(ptr %c)
   call void @chunk_destroy(ptr %c)
   br label %chunk_loop
@@ -666,38 +701,121 @@ after_unmap:
 
 define i32 @doc_insert(ptr %doc, i64 %pos, ptr %src, i64 %srclen) {
 entry:
-  %tb_field = getelementptr %Document, ptr %doc, i32 0, i32 0
-  %tb = load ptr, ptr %tb_field
-  %ok = call i32 @tb_insert(ptr %tb, i64 %pos, ptr %src, i64 %srclen)
+  %chunk = alloca ptr
+  %local = alloca i64
+  %acc = alloca i64
+  call void @doc_locate(ptr %doc, i64 %pos, ptr %chunk, ptr %local, ptr %acc)
+  %c = load ptr, ptr %chunk
+  %null = icmp eq ptr %c, null
+  br i1 %null, label %fail, label %cow
+cow:
+  %l = load i64, ptr %local
+  %tb = call ptr @doc_ensure_cow(ptr %c)
+  %ok = call i32 @tb_insert(ptr %tb, i64 %l, ptr %src, i64 %srclen)
   %ok_b = icmp eq i32 %ok, 1
-  br i1 %ok_b, label %record, label %ret
-
+  br i1 %ok_b, label %record, label %fail
 record:
+  %d = call i64 @chunk_delta(ptr %c)
+  %d2 = add i64 %d, %srclen
+  call void @chunk_set_delta(ptr %c, i64 %d2)
   %hist_field = getelementptr %Document, ptr %doc, i32 0, i32 2
   %hist = load ptr, ptr %hist_field
   call void @hist_record_insert(ptr %hist, i64 %pos, ptr %src, i64 %srclen)
-  br label %ret
-
-ret:
   call void @doc_sync_len(ptr %doc)
-  ret i32 %ok
+  ret i32 1
+fail:
+  ret i32 0
 }
 
 define i32 @doc_delete(ptr %doc, i64 %pos, i64 %dellen) {
 entry:
-  %tb_field = getelementptr %Document, ptr %doc, i32 0, i32 0
-  %tb = load ptr, ptr %tb_field
-  %data = call ptr @tb_data(ptr %tb)
-  %del_ptr = getelementptr i8, ptr %data, i64 %pos
-
+  ; se leen los bytes a borrar ANTES de modificar (el historial los copia)
+  %tmp = call ptr @malloc(i64 %dellen)
+  %null = icmp eq ptr %tmp, null
+  br i1 %null, label %fail, label %read
+read:
+  %got = call i64 @doc_read(ptr %doc, i64 %pos, i64 %dellen, ptr %tmp)
+  %chunk = alloca ptr
+  %local = alloca i64
+  %acc = alloca i64
+  call void @doc_locate(ptr %doc, i64 %pos, ptr %chunk, ptr %local, ptr %acc)
+  %c = load ptr, ptr %chunk
+  %cn = icmp eq ptr %c, null
+  br i1 %cn, label %fail_free, label %cow
+cow:
+  %l = load i64, ptr %local
+  %tb = call ptr @doc_ensure_cow(ptr %c)
+  %ok = call i32 @tb_delete(ptr %tb, i64 %l, i64 %got)
+  %ok_b = icmp eq i32 %ok, 1
+  br i1 %ok_b, label %record, label %fail_free
+record:
+  %d = call i64 @chunk_delta(ptr %c)
+  %d2 = sub i64 %d, %got
+  call void @chunk_set_delta(ptr %c, i64 %d2)
   %hist_field = getelementptr %Document, ptr %doc, i32 0, i32 2
   %hist = load ptr, ptr %hist_field
-  ; se registra ANTES de borrar -- los bytes todavía existen en el buffer.
-  call void @hist_record_delete(ptr %hist, i64 %pos, ptr %del_ptr, i64 %dellen)
-
-  %ok = call i32 @tb_delete(ptr %tb, i64 %pos, i64 %dellen)
+  call void @hist_record_delete(ptr %hist, i64 %pos, ptr %tmp, i64 %got)
+  call void @free(ptr %tmp)
   call void @doc_sync_len(ptr %doc)
-  ret i32 %ok
+  ret i32 1
+fail_free:
+  call void @free(ptr %tmp)
+  ret i32 0
+fail:
+  ret i32 0
+}
+
+declare void @chunk_set_delta(ptr, i64)
+
+; --- edición sin historial (para undo/redo): mismosCOW por chunk ---
+define i32 @doc_insert_raw(ptr %doc, i64 %pos, ptr %src, i64 %srclen) {
+entry:
+  %chunk = alloca ptr
+  %local = alloca i64
+  %acc = alloca i64
+  call void @doc_locate(ptr %doc, i64 %pos, ptr %chunk, ptr %local, ptr %acc)
+  %c = load ptr, ptr %chunk
+  %null = icmp eq ptr %c, null
+  br i1 %null, label %fail, label %cow
+cow:
+  %l = load i64, ptr %local
+  %tb = call ptr @doc_ensure_cow(ptr %c)
+  %ok = call i32 @tb_insert(ptr %tb, i64 %l, ptr %src, i64 %srclen)
+  %ok_b = icmp eq i32 %ok, 1
+  br i1 %ok_b, label %upd, label %fail
+upd:
+  %d = call i64 @chunk_delta(ptr %c)
+  %d2 = add i64 %d, %srclen
+  call void @chunk_set_delta(ptr %c, i64 %d2)
+  call void @doc_sync_len(ptr %doc)
+  ret i32 1
+fail:
+  ret i32 0
+}
+
+define i32 @doc_delete_raw(ptr %doc, i64 %pos, i64 %dellen) {
+entry:
+  %chunk = alloca ptr
+  %local = alloca i64
+  %acc = alloca i64
+  call void @doc_locate(ptr %doc, i64 %pos, ptr %chunk, ptr %local, ptr %acc)
+  %c = load ptr, ptr %chunk
+  %null = icmp eq ptr %c, null
+  br i1 %null, label %fail, label %cow
+cow:
+  %l = load i64, ptr %local
+  %tb = call ptr @doc_ensure_cow(ptr %c)
+  %ok = call i32 @tb_delete(ptr %tb, i64 %l, i64 %dellen)
+  %ok_b = icmp eq i32 %ok, 1
+  br i1 %ok_b, label %upd, label %fail
+upd:
+  %d = call i64 @chunk_delta(ptr %c)
+  %d2 = sub i64 %d, %dellen
+  call void @chunk_set_delta(ptr %c, i64 %d2)
+  call void @doc_sync_len(ptr %doc)
+  ret i32 1
+fail:
+  ret i32 0
 }
 
 define i32 @doc_can_undo(ptr %doc) {
@@ -737,18 +855,15 @@ do_undo:
   %data = load ptr, ptr %ok_data
   %len = load i64, ptr %ok_len
 
-  %tb_field = getelementptr %Document, ptr %doc, i32 0, i32 0
-  %tb = load ptr, ptr %tb_field
-
   %is_insert = icmp eq i64 %kind, 0
   br i1 %is_insert, label %undo_insert, label %undo_delete
 
 undo_insert:
-  call i32 @tb_delete(ptr %tb, i64 %pos, i64 %len)
+  %del_ok = call i32 @doc_delete_raw(ptr %doc, i64 %pos, i64 %len)
   br label %push_redo
 
 undo_delete:
-  call i32 @tb_insert(ptr %tb, i64 %pos, ptr %data, i64 %len)
+  %ins_ok = call i32 @doc_insert_raw(ptr %doc, i64 %pos, ptr %data, i64 %len)
   br label %push_redo
 
 push_redo:
@@ -783,18 +898,15 @@ do_redo:
   %data = load ptr, ptr %ok_data
   %len = load i64, ptr %ok_len
 
-  %tb_field = getelementptr %Document, ptr %doc, i32 0, i32 0
-  %tb = load ptr, ptr %tb_field
-
   %is_insert = icmp eq i64 %kind, 0
   br i1 %is_insert, label %redo_insert, label %redo_delete
 
 redo_insert:
-  call i32 @tb_insert(ptr %tb, i64 %pos, ptr %data, i64 %len)
+  %ins2 = call i32 @doc_insert_raw(ptr %doc, i64 %pos, ptr %data, i64 %len)
   br label %push_undo
 
 redo_delete:
-  call i32 @tb_delete(ptr %tb, i64 %pos, i64 %len)
+  %del2 = call i32 @doc_delete_raw(ptr %doc, i64 %pos, i64 %len)
   br label %push_undo
 
 push_undo:
@@ -808,14 +920,14 @@ ret_fail:
   ret i32 0
 }
 ; doc_replace_all: aplica replace_all (regex/replace.ll) sobre el
-; TextBuffer del documento, en el rango [scan_start, scan_end) con
-; [core_start, core_end) como zona comiteable (ver chunk_plan.ll para
-; cómo se calculan esos 4 offsets -- acá se reciben ya resueltos, este
-; archivo no sabe de líneas ni de chunking)
+; contenido del documento (materializado via doc_read), en el rango
+; [scan_start, scan_end) con [core_start, core_end) como zona comiteable
+; (ver chunk_plan.ll para cómo se calculan esos 4 offsets -- acá se reciben
+; ya resueltos, este archivo no sabe de líneas ni de chunking)
 ; Aplica los matches encontrados de ATRÁS PARA ADELANTE (mayor %start
-; primero) contra el TextBuffer -- así cada tb_delete/tb_insert no
-; invalida los offsets de los matches que todavía faltan aplicar, sin
-; necesidad de llevar un delta acumulado.
+; primero) via doc_delete/doc_insert -- así cada edición no invalida los
+; offsets de los matches que todavía faltan aplicar, sin necesidad de
+; llevar un delta acumulado.
 ; Devuelve la cantidad de reemplazos aplicados, o -1 si %prog es null
 ; (replace_all devolvió 0).
 
@@ -823,13 +935,15 @@ ret_fail:
 define i64 @doc_replace_all(ptr %doc, ptr %prog,ptr %replacement_template, i64 %replacement_len,i64 %core_start, i64 %core_end,i64 %scan_start, i64 %scan_end) {
 entry:
   %prog_null = icmp eq ptr %prog, null
-  br i1 %prog_null, label %fail, label %setup
+  br i1 %prog_null, label %fail_null, label %setup
 
 setup:
-  %tb_ptr = getelementptr %Document, ptr %doc, i32 0, i32 0
-  %tb = load ptr, ptr %tb_ptr
-  %text_len = call i64 @tb_length(ptr %tb)
-  %text = call ptr @tb_data(ptr %tb)
+  ; Deuda aceptada: materializa el documento via doc_read (el maestro esta
+  ; vacio en cargas lazy). Los resultados se aplican luego con doc_delete /
+  ; doc_insert sobre los chunks.
+  %text_len = call i64 @doc_length(ptr %doc)
+  %text = call ptr @malloc(i64 %text_len)
+  %got = call i64 @doc_read(ptr %doc, i64 0, i64 %text_len, ptr %text)
 
   %starts_slot = alloca ptr
   %ends_slot = alloca ptr
@@ -886,8 +1000,13 @@ apply_body:
 
 apply_done:
   call void @replace_all_free_results(ptr %starts, ptr %ends, ptr %repls, ptr %repl_lens, i64 %count)
+  call void @free(ptr %text)
   ret i64 %count
 
 fail:
+  call void @free(ptr %text)
+  ret i64 -1
+
+fail_null:
   ret i64 -1
 }
