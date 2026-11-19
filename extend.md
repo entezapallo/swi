@@ -46,7 +46,7 @@ IR con su test.
 | `tui/fileman.ll` | Dueño del cwd, listado, selección y scroll del file manager. |
 | `tui/memory.ll` | Sesión: tabs, cursor, foco, layout, `last_dir`. |
 | `tui/main.c` | Dibujo de tabs, consola y file manager; loop de foco; hot reload; selftest. |
-| `tui/fexl_ui.h/.c` | `UiFrame`: lo que Fexl devuelve al motor. Parser de `SPANS`/`BIND`. |
+| `tui/fexl_ui.ll` | `UiFrame`: lo que Fexl devuelve al motor. Parser de `SPANS`/`BIND`. |
 | `abi/tui_abi.h` | Espejo en C de los structs y funciones del IR. Si agregás algo al IR, agregalo acá. |
 | `core/document.ll` | Dueño del texto: `doc_read`, `doc_length`, `doc_insert`, `doc_delete`. |
 | `ui.fxl` | Dueño del layout y de los BIND. |
@@ -150,7 +150,7 @@ Si querés que Fexl decida el tamaño del panel:
    `fexl_ui_event()` y **todas** las llamadas a `ui_sync(...)` (son ~10).
 3. `ui.fxl`: leer un quinto `fgetc` y emitir `say ["OUTLINE_H " (num oh)]`,
    agregando `60` a la tabla `num`.
-4. `fexl_ui.c`: parser de la nueva línea con `sscanf`.
+4. `fexl_ui.ll`: parser de la nueva línea con `sscanf`/`strtol`.
 5. `main.c`: usar `g_ui.outline_h` en `canvas_layout_panels()`.
 
 Recordá la regla del protocolo: un código nuevo no puede ser `10` (LF).

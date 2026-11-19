@@ -15,6 +15,39 @@
  * `void *` en esta declaracion.
  */
 
+/* espejo de %UiFrame y %FmtSpan en fexl_ui.ll (4116 bytes) */
+#define FUI_MAX_BINDS 12
+#define FUI_KEY_LEN  16
+#define FUI_ACT_LEN  32
+#define FUI_STATUS_LEN 64
+#define FUI_LOG_LEN 256
+#define FUI_MAX_SPANS 256
+
+typedef struct { int32_t start, len, style; } FmtSpan;
+
+typedef struct {
+    int32_t console_h, tabs_col, fileman_w;
+    char status[FUI_STATUS_LEN];
+    char log[FUI_LOG_LEN];
+    char err[128];
+    FmtSpan span[FUI_MAX_SPANS];
+    int32_t nspan;
+    struct { char key[FUI_KEY_LEN]; char act[FUI_ACT_LEN]; } bind[FUI_MAX_BINDS];
+    int32_t nbind;
+} UiFrame;
+
+enum {
+    FUI_INIT = 'i', FUI_CONSOLE = '2', FUI_FILEMAN = '3',
+    FUI_TABS = '4', FUI_MODE = 'm', FUI_COMMAND = 'c',
+    FUI_TABCHG = 't', FUI_QUIT = 'q', FUI_EVAL = 'x', FUI_FMT = 'F'
+};
+
+extern int32_t fexl_ui_start(const char *fexl_bin, const char *script);
+extern void    fexl_ui_event(int32_t ev, int32_t a, int32_t b, int32_t c,
+                             UiFrame *out);
+extern void    fexl_ui_stop(void);
+extern int32_t fexl_ui_alive(void);
+
 /* espejo de %Rect en canvas.ll */
 typedef struct { int32_t x, y, w, h; } SwiRect;
 

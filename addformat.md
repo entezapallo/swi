@@ -8,7 +8,7 @@ aplica. Así se pueden cambiar patrones sin recompilar.
 | Archivo | Rol |
 |---|---|
 | `ui.fxl` | define los patrones con `regex.compile`, corre `regex.spans` y emite líneas `SPANS` |
-| `tui/fexl_ui.h/.c` | evento `FUI_FMT` ('F'), parser de `SPANS <style> <start,end;...>` en `UiFrame.span[]` |
+| `tui/fexl_ui.ll` | evento `FUI_FMT` ('F'), parser de `SPANS <style> <start,end;...>` en `UiFrame.span[]` |
 | `tui/main.c` | `fmt_send()` lee el buffer con `doc_read()` (chunks), lo escribe a `/tmp/swi_fmt_input.txt`, pide spans y los aplica con `fmt_add_span()` |
 | `tui/win_editor.ll` | `win_editor_fmt()`, `win_editor_clear_spans()` y `hl_style_at()` |
 | `regex/format.ll` | `fmt_create`, `fmt_clear`, `fmt_add_span`, `fmt_cache_*` |
@@ -56,7 +56,7 @@ SPANS 5 22,24
 .
 ```
 
-`fexl_ui.c` convierte cada par en `FmtSpan {start, len, style}` y `main.c`
+`fexl_ui.ll` convierte cada par en `FmtSpan {start, len, style}` y `main.c`
 hace:
 
 ```c

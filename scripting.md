@@ -81,7 +81,7 @@ BIND C-F fileman.toggle
 .
 ```
 
-`fexl_ui.c` parsea esas líneas en `UiFrame` (`tui/fexl_ui.h`): `console_h`,
+`fexl_ui.ll` parsea esas líneas en `UiFrame` (`abi/tui_abi.h`): `console_h`,
 `tabs_col`, `fileman_w`, `status`, `log`, `err`, `span[]` y `bind[]`.
 
 Los `BIND` **son autoridad**: `main.c` pregunta `has_bind("console.toggle")`

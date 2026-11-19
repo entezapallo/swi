@@ -180,12 +180,6 @@ $(BUILD)/main.bc: tui/main.c tui/in.h tui/out.h tui/eval.h tui/fexl_ui.h tui/ter
 $(BUILD)/eval.bc: tui/eval.c tui/eval.h | $(BUILD)
 	$(CLANG) $(CBCFLAGS) $(EVAL_DEF) -I. -c $< -o $@
 
-$(BUILD)/fexl_ui.o: tui/fexl_ui.c tui/fexl_ui.h | $(BUILD)
-	$(CLANG) $(CFLAGS) -I. -c $< -o $@
-
-$(BUILD)/fexl_ui.bc: tui/fexl_ui.c tui/fexl_ui.h | $(BUILD)
-	$(CLANG) $(CBCFLAGS) -I. -c $< -o $@
-
 # --- IR: un modulo por objeto / bitcode ---
 # Los modulos de regex/ reciben RX_TYPES concatenado (LLVM IR no tiene include),
 # para que %RxInst/%RxProgram tengan UNA sola definicion compartida.
@@ -202,12 +196,12 @@ $(BUILD)/%.o: %.ll | $(BUILD)
 $(BUILD)/%.bc: %.ll | $(BUILD)
 	$(OPT) $(OPT_TRIPLE) $(OPT_PASS) $< -o $@
 
-TUI_LL := state window canvas win_editor console memory fileman
+TUI_LL := state window canvas win_editor console memory fileman fexl_ui
 ENGINE_LL := fsio_posix fsio_ensure_dir fsio_list_dir fsio_actions fsio_getdents \
              textbuffer lineindex document history find chunk \
              replace regex_parser regex_compiler regex_thread regex_runner format
 ALL_LL := $(TUI_LL) $(ENGINE_LL)
-ALL_C  := main in out eval fexl_ui
+ALL_C  := main in out eval
 
 LL_OBJ := $(addprefix $(BUILD)/,$(addsuffix .o,$(ALL_LL)))
 C_OBJ  := $(addprefix $(BUILD)/,$(addsuffix .o,$(ALL_C)))
