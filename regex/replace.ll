@@ -6,8 +6,6 @@
 ; %RxInst/%RxProgram DUPLICADOS de regex_runner.ll/regex_compiler.ll. DEBEN
 ; COINCIDIR -- mismo trade-off de duplicación ya aceptado en el resto del
 ; proyecto (core_abi.h, rx_atom_clone/rx_ast_clone, etc).
-%RxInst    = type { i64, i64, i64 }
-%RxProgram = type { ptr, i64, i64 }
 
 declare ptr @malloc(i64)
 declare ptr @realloc(ptr, i64)

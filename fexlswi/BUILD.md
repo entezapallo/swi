@@ -34,8 +34,8 @@ Todo se compila con `-Oz`, se fusiona en `lib/fexlswi.bc` y se linkea con
 
 ```
 src/        código C de Fexl + lib_build + build + build_regex
-regex/      7 .ll de regex (copias reales)
-regex/build .bc generados con -mtriple=x86_64-linux-musl
+../regex/   11 módulos regex compartidos con swi (incluye rx_types.ll)
+../regex/build .bc generados con -mtriple=x86_64-linux-musl
 lib/, obj/  generados
 build/      binarios de ambos perfiles
 test/       suite Fexl

@@ -22,7 +22,6 @@ declare void @rx_program_destroy(ptr)
 declare void @rx_ast_destroy(ptr)
 %RxNode = type { i64, ptr, ptr, i64, i64 }
 %RxName = type { ptr, i64 }
-%RxProgram = type { ptr, i64, i64 }
 %PState = type { ptr, i64, i64, i64, i64 }
 %MacroDef = type { ptr, i64, i64, i64, ptr, i64, ptr }
 %Symtab   = type { ptr, i64, i64 }

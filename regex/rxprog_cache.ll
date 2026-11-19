@@ -2,8 +2,6 @@
 ;
 ; %RxProgram/%RxInst DUPLICADOS de core/regex_compiler.ll (líneas 51-52).
 ; DEBEN COINCIDIR — si el struct real cambia allá, actualizar acá también.
-%RxInst    = type { i64, i64, i64 }      ; opcode, arg1, arg2
-%RxProgram = type { ptr, i64, i64 }      ; instructions, count, num_groups
 
 ; formato .rxc:
 ;   [magic:i64][self_hash:i64][dep_hash:i64][count:i64][num_groups:i64]

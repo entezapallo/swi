@@ -9,8 +9,6 @@
 ; No usa `switch` -> no necesita -relocation-model=pic.
 ;
 ; %RxProgram/%RxInst duplicados con el mismo layout que regex_compiler.ll.
-%RxInst    = type { i64, i64, i64 }
-%RxProgram = type { ptr, i64, i64 }
 
 declare ptr @rx_run(ptr, ptr, i64)
 declare i64 @thread_get_save(ptr, i64)

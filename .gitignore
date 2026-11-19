@@ -1,4 +1,5 @@
 build/
 build-opt/
+regex/build/
 *.o
 *.bc

@@ -23,6 +23,11 @@ OPT     ?= opt-21
 MODULOS := regex_parser regex_compiler regex_abregex regex_thread \
            regex_runner rx_query rx_runtime
 
+# Los 11 modulos regex viven en regex/ en la raiz del repo (~/swi).
+# RXDIR es relativo a la raiz de fexlswi; build_regex ya usa ../regex/build.
+RXDIR    := ../regex
+RX_TYPES := $(RXDIR)/rx_types.ll
+
 # musl dinamico, tamano minimo: mismo esquema que ~/swi
 MUSL_LINK := -L/usr/lib/x86_64-linux-musl \
              -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 \
@@ -43,10 +48,11 @@ all: opt selfh
 # llevan section/align/gc/prefix/prologue/personality/comdat o metadata tras
 # la lista de argumentos).
 define REGLAS_REGEX
-	mkdir -p regex/build
+	mkdir -p $(RXDIR)/build
 	@for m in $(MODULOS); do \
-		sed -E '/^define /{/\)[^)]*([ ](section|align|gc|prefix|prologue|personality|comdat)[ ]|!)[^)]*\{$$/b;s/ \{$$/ nounwind optsize minsize {/}' regex/$$m.ll \
-		| $(OPT) -mtriple=x86_64-linux-musl -passes='verify,default<Oz>' - -o regex/build/$$m.bc || exit 1; \
+		{ cat $(RX_TYPES); \
+		  sed -E '/^define /{/\)[^)]*([ ](section|align|gc|prefix|prologue|personality|comdat)[ ]|!)[^)]*\{$$/b;s/ \{$$/ nounwind optsize minsize {/}' $(RXDIR)/$$m.ll; } \
+		| $(OPT) -mtriple=x86_64-linux-musl -passes='verify,default<Oz>' - -o $(RXDIR)/build/$$m.bc || exit 1; \
 	done
 endef
 
@@ -88,5 +94,5 @@ selfh:
 
 clean:
 	cd src && ./build clean
-	rm -rf build bin lib obj regex/build
+	rm -rf build bin lib obj $(RXDIR)/build
 	@echo "limpio"

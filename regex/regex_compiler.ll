@@ -48,8 +48,6 @@ declare i64 @rx_number_groups(ptr, i64)   ; de regex_parser.ll
 ; aparece acá es bug de resolución, fail loud.
 %RxNode = type { i64, ptr, ptr, i64, i64 }  ; kind, child1, child2, lit_char, group_id (-1 si no aplica)
 
-%RxInst    = type { i64, i64, i64 }  ; opcode, arg1, arg2
-%RxProgram = type { ptr, i64, i64 }  ; instructions, count, num_groups
 
 ; ================= helpers =================
 

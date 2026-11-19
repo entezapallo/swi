@@ -9,8 +9,9 @@
 #   3. llvm-link de TODOS los obj/*.bc + 7 modulos -> lib/fexlswi.bc
 #   4. opt-21 LTO + clang dinamico musl -> bin/fexlswi / bin/fexlswi0
 #
-# Los 7 modulos del motor viven en regex/*.ll de este proyecto y se
-# compilan a regex/build/*.bc con ./build.sh (opt con -mtriple).
+# Los 7 modulos del motor viven en ../../regex/*.ll (unificados con swi) y se
+# compilan a ../../regex/build/*.bc con el Makefile de fexlswi (opt con
+# -mtriple y los tipos compartidos de rx_types.ll).
 
 set -e
 . ./lib_build
@@ -29,7 +30,7 @@ echo "== 2. fexl.c con JOTTER_REGEX =="
 run $CC $OPTFLAGS -DJOTTER_REGEX fexl.c -o ../obj/fexl_regex.bc
 
 echo "== 3. modulos del motor (7 sin fsio) =="
-RXDIR=../regex/build
+RXDIR=../../regex/build
 RX_MODULES="regex_parser regex_compiler regex_abregex regex_thread \
 regex_runner rx_query rx_runtime"
 RX_BC=""

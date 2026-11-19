@@ -56,8 +56,6 @@ declare i64 @thread_state(ptr)
 declare void @thread_set_state(ptr, i64)
 declare void @thread_kill(ptr)
 
-%RxInst    = type { i64, i64, i64 }  ; opcode, arg1, arg2
-%RxProgram = type { ptr, i64, i64 }  ; instructions, count, num_groups
 
 ; ---------------------------------------------------------------------
 ; rx_alloc_gen: array de dedup, uno por instrucción, todo en -1 (ningún

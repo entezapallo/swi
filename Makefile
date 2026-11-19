@@ -78,7 +78,10 @@ LTO        :=
 endif
 
 CORE  := core
-REGEX := fexlswi/regex regex
+REGEX := regex
+RX_TYPES := regex/rx_types.ll
+# Modulos de regex/ que se linkean en swi (inyectan RX_TYPES al compilar).
+REGEX_LL := replace format regex_parser regex_compiler regex_thread regex_runner
 FSIO  := fsio
 vpath %.ll tui $(CORE) $(REGEX) $(FSIO)
 
@@ -98,10 +101,10 @@ endif
 define BUILD_FEXL
 	cd fexlswi/src && ./build clean
 	rm -rf fexlswi/build/$(P)
-	mkdir -p fexlswi/regex/build
+	mkdir -p regex/build
 	@for m in $(MODULOS); do \
-		$(P_FILT) fexlswi/regex/$$m.ll \
-		| $(OPT) -mtriple=x86_64-linux-musl -passes='$(P_MOD)' - -o fexlswi/regex/build/$$m.bc || exit 1; \
+		{ cat $(RX_TYPES); $(P_FILT) regex/$$m.ll; } \
+		| $(OPT) -mtriple=x86_64-linux-musl -passes='$(P_MOD)' - -o regex/build/$$m.bc || exit 1; \
 	done
 	cd fexlswi/src && \
 		FEXL_CC="$(FEXL_CC)" FEXL_COPT='$(P_COPT)' \
@@ -164,7 +167,7 @@ selfh:
 
 clean:
 	cd fexlswi/src && ./build clean
-	rm -rf fexlswi/build fexlswi/bin fexlswi/lib fexlswi/obj fexlswi/regex/build
+	rm -rf fexlswi/build fexlswi/bin fexlswi/lib fexlswi/obj regex/build
 	rm -rf build build-opt .install-build
 	@echo "swi + fexlswi limpios"
 
@@ -235,6 +238,15 @@ $(BUILD)/fexl_ui.bc: tui/fexl_ui.c tui/fexl_ui.h | $(BUILD)
 	$(CLANG) $(CBCFLAGS) -I. -c $< -o $@
 
 # --- IR: un modulo por objeto / bitcode ---
+# Los modulos de regex/ reciben RX_TYPES concatenado (LLVM IR no tiene include),
+# para que %RxInst/%RxProgram tengan UNA sola definicion compartida.
+$(foreach m,$(REGEX_LL),$(BUILD)/$(m).o): $(BUILD)/%.o: regex/%.ll $(RX_TYPES) | $(BUILD)
+	cat $(RX_TYPES) $< | $(OPT) $(OPT_TRIPLE) $(OPT_PASS) - -o - \
+	  | $(LLC) $(LLC_OPTS) -filetype=obj - -o $@
+
+$(foreach m,$(REGEX_LL),$(BUILD)/$(m).bc): $(BUILD)/%.bc: regex/%.ll $(RX_TYPES) | $(BUILD)
+	cat $(RX_TYPES) $< | $(OPT) $(OPT_TRIPLE) $(OPT_PASS) - -o $@
+
 $(BUILD)/%.o: %.ll | $(BUILD)
 	$(OPT) $(OPT_TRIPLE) $(OPT_PASS) $< -o - | $(LLC) $(LLC_OPTS) -filetype=obj - -o $@
 

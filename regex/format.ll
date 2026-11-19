@@ -36,8 +36,6 @@ declare void @rx_charclass_set(ptr, i8)           ; regex_parser.ll
 declare ptr @regex_compile(ptr, i64)
 declare void @rx_program_destroy(ptr)
 declare i1   @rx_charclass_test(ptr, i8)          ; regex_parser.ll
-%RxInst    = type { i64, i64, i64 }  ; mismo layout que regex_compiler.ll
-%RxProgram = type { ptr, i64, i64 }  ; mismo layout que regex_compiler.ll
 
 ; ================= FormatResult / FormatSpan =================
 
