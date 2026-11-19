@@ -1,0 +1,23 @@
+#
+load_extend
+evaluate \;
+
+load_argv
+load_basic
+load_list
+load_output
+evaluate \;
+
+# Using technique for breaking a loop.
+(
+\\break
+each (range 0 10)
+	(\i
+	\\loop
+	\val=(argv i)
+	is_undef val break;
+	say ["argv "i" = "(val)]
+	loop
+	)
+);
+say "END"

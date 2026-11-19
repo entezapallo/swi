@@ -1,0 +1,116 @@
+#
+\list_all=
+[
+"a1"
+"a2"
+"a3"
+"a4"
+"a5"
+"a8"
+"a9"
+"b10"
+"b11"
+"b12"
+"b13"
+"b14"
+"b15"
+"b16"
+"b17"
+"b18"
+"b19"
+"b20"
+"b21"
+"b22"
+"b23"
+"b24"
+"syntax"
+"b44"
+"b45"
+"b46"
+"b47"
+"b48"
+"b49"
+"b50"
+"b51"
+"b53"
+"b54"
+"b55"
+"guard"
+"leak"
+"chars"
+"crypto"
+"date"
+"get_byte"
+"mf"
+"missing"
+"partition"
+"sat"
+"sort"
+"stats"
+"dynamic"
+"meta"
+"stream"
+"resolve"
+"record"
+"index_C"
+"std"
+"tan"
+"minimal"
+"flintstone"
+]
+
+# Gather any individually specified tests.
+\list=
+	(
+	(@\\loop\n
+	\x=(argv n)
+	is_undef x [];
+	\n=(+ 1 n)
+	[x;loop n]
+	) 2
+	)
+
+\list=(is_null list list_all list)
+
+# Run a shell command with no input.
+\sh=(\cmd run_program ["/bin/sh" "-c" (to_str cmd)] "")
+
+\cmd_show=(to_str [(argv 0)" test/show.fxl "])
+
+\run_show=
+	(\name\extra
+	sh [cmd_show name extra]
+	)
+
+\\refresh=
+	(
+	\_=(mkdir "new" (oct "775"))
+	each list
+		(\name
+		say ["refresh "name" "]
+		run_show name [" >new/"name]
+		\out\err\status
+		)
+	)
+
+\\check=
+	(
+	each list
+		(\name
+		put ["test "name" "]
+		run_show name [" | diff - out/"name]
+		\out\err\status
+		eq 0 status
+			(say "good")
+			(
+			say "failed"
+			put out
+			put err
+			say ["failed "name]
+			)
+		)
+	)
+
+trace_elapsed;
+#refresh
+check

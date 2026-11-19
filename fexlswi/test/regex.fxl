@@ -1,0 +1,40 @@
+# test/regex.fxl — smoke test del tipo regex en Fexl (batch, sin TUI).
+# Correr: bin/fexl-regex0 test/regex.fxl
+
+load_basic
+load_output
+load_regex
+load_script
+evaluate \;
+
+say "=== regex.compile / match / count / search / spans ==="
+nl
+say ["count: "(regex.count (regex.compile "foo") "foo bar foo")] nl
+say ["match: "(regex.match (regex.compile "foo") "zzz")] nl
+say ["search: "(regex.search (regex.compile "foo") "xxfoo" 0 1)] nl
+say ["spans: "(regex.spans (regex.compile "foo") "foo bar foo" 5)] nl
+say ["is_regex: "(is_regex (regex.compile "foo"))] nl
+say ["@ literal: "(regex.count (regex.compile "a@b") "xxa@byya@b")] nl
+
+say "=== abregex: define + compile en sesion ==="
+nl
+say (\s = (abregex.session)
+      \d = (abregex.define s "@digit::[0-9];")
+      \p = (abregex.compile s "digit")
+      ["digit count: "(regex.count p "a1b22")" define="d" isreg="(is_regex p)])
+nl
+
+say (\s = (abregex.session)
+      \d1 = (abregex.define s "@digit::[0-9];")
+      \d2 = (abregex.define s "@word::[a-z]+;")
+      \p = (abregex.compile s "digit")
+      \w = (abregex.compile s "word")
+      ["after 2 defines: digit="(regex.count p "a1b22")
+       " word="(regex.count w "abc 123")])
+nl
+
+say "=== scripting: booleanos y switches (consola) ==="
+nl
+say ["true="true" false="false] nl
+say ["switch set="(set_switch "demo" 1)" get="(get_switch "demo")] nl
+say ["switch off="(switch "demo" 0)" get="(get_switch "demo")] nl

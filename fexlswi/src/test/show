@@ -1,0 +1,2 @@
+#!/bin/sh
+./fexl test/show.fxl $1

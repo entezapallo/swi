@@ -1,0 +1,501 @@
+#
+\try_keys=
+	(
+	\keys=["a" "b" "c" "d" "e"]
+	\obj
+	say ["count "(as_str; record_count obj)]
+	each keys
+		(\key
+		\v=(obj key)
+		say [key" = "(as_str v)]
+		)
+	nl
+	)
+
+\\test_1=
+	(
+	say "= test_1"
+
+	\obj=empty
+	set obj "b" (put "!" 2)
+
+	try_keys obj
+	)
+
+\\test_2=
+	(
+	say "= test_2"
+
+	\obj=empty
+	set obj "b" (put "!" 2)
+	set obj "b" 22
+	set obj "b" 222
+
+	try_keys obj
+	)
+
+\\test_3=
+	(
+	say "= test_3"
+
+	\obj=empty
+	set obj "b" (put "!" 2)
+	set obj "b" 22
+
+	try_keys obj
+	)
+
+\\test_4=
+	(
+	say "= test_4"
+
+	\obj=empty
+	set obj "d" 4
+	set obj "d" 44
+	set obj "b" 2
+	set obj "c" 3
+	set obj "c" 33
+	set obj "a" 1
+
+	try_keys obj
+	)
+
+\\test_5=
+	(
+	say "= test_5"
+
+	\obj=empty
+	set obj "d" 4
+	set obj "d" 44
+	set obj "b" 2
+	set obj "c" 3
+	set obj "c" 33
+	set obj "a" 11
+	set obj "a" 1
+	set obj "e" 5
+
+	try_keys obj
+	)
+
+\\test_6=
+	(
+	say "= test_6"
+
+	\obj=empty
+	set obj "d" 4
+	set obj "d" 44
+	set obj "b" 2
+	set obj "c" 3
+	set obj "c" 33
+	set obj "a" 11
+	set obj "a" 1
+	set obj "e" 5
+
+	try_keys obj
+	)
+
+\\test_7=
+	(
+	say "= test_7"
+
+	\obj_2810=
+		(
+		\obj=empty
+		set obj "d" 4
+		set obj "d" 44
+		obj
+		)
+
+	\obj_3043=
+		(
+		\obj=(record_copy obj_2810)
+		set obj "b" 2
+		set obj "c" 3
+		obj
+		)
+
+	\obj_7892=
+		(
+		\obj=(record_copy obj_3043)
+		set obj "c" 33
+		set obj "a" 11
+		set obj "a" 1
+		set obj "e" 5
+		obj
+		)
+
+	\obj_8237=
+		(
+		\obj=(record_copy obj_2810)
+		set obj "e" 5
+		obj
+		)
+
+	(
+	say "obj_3043:"
+	try_keys obj_3043
+	)
+
+	(
+	say "obj_8237:"
+	try_keys obj_8237
+	)
+
+	(
+	say "obj_7892:"
+	try_keys obj_7892
+	)
+	)
+
+# Test chain function
+\\test_8=
+	(
+	say "= test_8"
+
+	\f1=
+		(
+		\obj=empty
+		set obj "b" 2
+		set obj "a" 1
+		obj
+		)
+
+	\f2=
+		(
+		\obj=empty
+		set obj "c" 3
+		obj
+		)
+
+	\f=(:: f1 f2)
+
+	show_benchmark;
+	try_keys f
+	)
+
+\\test_9=
+	(
+	say "= test_9"
+
+	say (as_str; record_count empty)
+	say (as_str; record_count void)
+
+	\obj=
+	(
+	\obj=empty
+	set obj "d" 4
+	set obj "d" 44
+	set obj "c" 3
+	set obj "c" 33
+	set obj "a" 11
+	set obj "a" 1
+	set obj "e" 5
+	obj
+	)
+
+	try_keys obj
+
+	show_benchmark;
+
+	each ["x" void -1 2.6 99; range 0 (record_count obj)]
+		(\pos
+		\item=(record_item obj pos)
+		say ["at "(as_str pos)" = "(as_str item)]
+		)
+
+	\pairs=(record_pairs obj)
+	say_data pairs
+	say_data pairs
+	)
+
+\\test_10=
+	(
+	say "= test_10"
+	# Test avoid leak with update.
+	(
+	\obj=empty
+	set obj "a" 1
+	set obj "a" obj
+	set obj "a" void # Clear cycle to avoid leak.
+	)
+	# Test avoid leak with insert.
+	(
+	\obj=empty
+	set obj "a" 1
+	set obj "b" obj
+	set obj "b" void # Clear cycle to avoid leak.
+	)
+	)
+
+\\test_11=
+	(
+	say "= test_11"
+	# Test setf and get.
+
+	show_benchmark;
+
+	\obj=
+		(
+		\obj=empty
+		setf obj "wilma" (say "I am Wilma.")
+		setf obj "fred" (say "I am Fred.")
+		set obj "x" (say "CALC" + 2 3)
+		obj
+		)
+	say ["x = "(obj "x")]
+	obj "fred"
+	obj "wilma"
+	nl
+
+	# Look up a key value and run it if found.
+	\try=
+		(\key
+		get obj key
+			(say ["NO "key])
+			(\\val
+			say ["YES "key]
+			val
+			)
+		)
+
+	try "xfred"
+	try "fred"
+	try "wilma"
+	)
+
+\\test_12=
+(
+# Demonstrate object-oriented functional programming (OOFP).
+#
+# This demo uses a Smalltalk messaging style, but avoids dispatch overhead by
+# grabbing method handles up front.  It does "multi-level hashes" like Perl,
+# but in a more precisely controlled way.  It demonstrates "inheritance" by
+# extending the new_slot routine.
+
+say "= test_12"
+
+\getf=
+	(\obj\key
+	get obj key void
+	)
+
+# Return a new slot with initial value.
+\new_slot=
+	(\val
+
+	\v=var_new
+	var_put v val
+
+	\obj=empty
+	set obj "put" (var_put v)
+	setf obj "get" (var_get v)
+	obj
+	)
+
+# Return a new tree with a function to create a new value when needed.
+\new_tree=
+	(\new_val
+
+	\v=var_new
+	var_put v empty
+
+	\obj=empty
+
+	# This "auto-vivifies" an entry at the given key.
+	setf obj "at"
+		(\key
+		get (var_get v) key
+			(
+			\val=new_val
+			\obj=(var_get v)
+			setf obj key val
+			val
+			)
+			()
+		)
+	obj
+	)
+
+# Extend slot with a "mod" routine to apply a function to the value.
+\new_slot=
+	(\val
+	\obj=(new_slot val)
+	getf obj "put" \\put
+	getf obj "get" \\val
+	setf obj "mod" (\f put (f val))
+	obj
+	)
+
+# Extend slot with a "show" routine.
+\new_slot=
+	(\val
+	\obj=(new_slot val)
+	getf obj "get" \\val
+	setf obj "show" (say ["val = "(as_str val)])
+	obj
+	)
+
+# Run a test on a given object.
+\run_test=
+	(\obj
+	getf obj "put" \\put
+	getf obj "show" \\show
+	getf obj "mod" \\mod
+
+	(
+	show_benchmark;
+	show
+	put 3
+	show
+	put 4
+	show
+	mod (* 2)
+	show
+	)
+	nl
+	)
+
+# Level 0
+(
+\obj=(new_slot 0)
+run_test obj
+)
+
+# Level 1
+(
+\obj=(new_tree; new_slot 0)
+\obj=(obj "at" "x")
+run_test obj
+)
+
+# Level 2
+(
+\obj=(new_tree; new_tree; new_slot 0)
+\obj=(obj "at" "x" "at" "y")
+run_test obj
+)
+
+# Level 3
+(
+\obj=(new_tree; new_tree; new_tree; new_slot 0)
+\obj=(obj "at" "x" "at" "y" "at" "z")
+run_test obj
+)
+)
+
+# Test mixed number and string keys in a record.
+\\test_mixed_keys=
+(
+say "= test_mixed_keys"
+
+\obj=empty
+
+\\show_record=
+	(
+	say ["count = "(record_count obj)]
+	walk_record obj
+		(\k\v
+		say (as_str ["set" k v])
+		)
+	)
+
+# Set keys.
+(
+\try=
+	(\v
+	set obj v [v]
+	)
+
+try "c"
+try "a"
+try 10
+try 5
+try "b"
+try 20
+try "d"
+try 0
+try -3
+)
+
+show_record
+
+# Get keys.
+(
+nl
+\try=
+	(\k
+	get obj k
+		(
+		say (as_str ["no" k])
+		)
+		(\v
+		say (as_str ["yes" k v])
+		)
+	)
+
+try "c"
+try "a"
+try 10
+try 5
+try "b"
+try 20
+try "d"
+try 0
+try -3
+
+try 2
+try "e"
+try 3
+try "a"
+try 10
+)
+
+# Delete keys.
+(
+\try=
+	(\key
+	say (as_str ["del" key])
+	del obj key
+	)
+nl
+try 15
+try "A"
+try "e"
+try "a"
+try -3
+try "d"
+try "a"
+nl
+show_record
+nl
+try "b"
+try 10
+try 10
+try 25
+try "a"
+try 20
+nl
+show_record
+nl
+try 0
+try 5
+try "c"
+nl
+show_record
+)
+)
+
+say "BEG"
+test_1
+test_2
+test_3
+test_4
+test_5
+test_6
+test_7
+test_8
+test_9
+test_10
+test_11
+test_12
+test_mixed_keys

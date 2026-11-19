@@ -1,0 +1,16 @@
+extern value Qstd;
+extern value type_quo(value f);
+extern value type_ref(value f);
+extern value quo(value val);
+extern value ref(string name, unsigned long line);
+extern value join(type t, value x, value y);
+extern value app(value x, value y);
+extern value lam(type type, string name, value e);
+extern value type_form(value f);
+extern value Qform(value label, value exp);
+extern value type_D(value f);
+extern value type_E(value f);
+extern value type_evaluate(value f);
+extern value type_load_sym(value f);
+extern void beg_sym(void);
+extern void end_sym(void);

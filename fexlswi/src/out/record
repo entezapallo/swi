@@ -1,0 +1,221 @@
+\out=
+~
+BEG
+= test_1
+!count 1
+a = void
+b = 2
+c = void
+d = void
+e = void
+
+= test_2
+!count 1
+a = void
+b = 222
+c = void
+d = void
+e = void
+
+= test_3
+!count 1
+a = void
+b = 22
+c = void
+d = void
+e = void
+
+= test_4
+count 4
+a = 1
+b = 2
+c = 33
+d = 44
+e = void
+
+= test_5
+count 5
+a = 1
+b = 2
+c = 33
+d = 44
+e = 5
+
+= test_6
+count 5
+a = 1
+b = 2
+c = 33
+d = 44
+e = 5
+
+= test_7
+obj_3043:
+count 3
+a = void
+b = 2
+c = 3
+d = 44
+e = void
+
+obj_8237:
+count 2
+a = void
+b = void
+c = void
+d = 44
+e = 5
+
+obj_7892:
+count 5
+a = 1
+b = 2
+c = 33
+d = 44
+e = 5
+
+= test_8
+count void
+a = 1
+b = 2
+c = 3
+d = void
+e = void
+
+steps 295 bytes 3808
+= test_9
+0
+void
+count 4
+a = 1
+b = void
+c = 33
+d = 44
+e = 5
+
+at "x" = void
+at void = void
+at -1 = {"a" 1}
+at 2.6 = {"d" 44}
+at 99 = void
+at 0 = {"a" 1}
+at 1 = {"c" 33}
+at 2 = {"d" 44}
+at 3 = {"e" 5}
+at 4 = void
+[
+{"a" 1}
+{"c" 33}
+{"d" 44}
+{"e" 5}
+]
+[
+{"a" 1}
+{"c" 33}
+{"d" 44}
+{"e" 5}
+]
+steps 2286 bytes 4992
+= test_10
+= test_11
+CALC
+x = 5
+I am Fred.
+I am Wilma.
+
+NO xfred
+YES fred
+I am Fred.
+YES wilma
+I am Wilma.
+steps 106 bytes 736
+= test_12
+val = 0
+val = 3
+val = 4
+val = 8
+steps 133 bytes 3360
+
+val = 0
+val = 3
+val = 4
+val = 8
+steps 132 bytes 3360
+
+val = 0
+val = 3
+val = 4
+val = 8
+steps 132 bytes 3360
+
+val = 0
+val = 3
+val = 4
+val = 8
+steps 132 bytes 3360
+
+= test_mixed_keys
+count = 9
+["set" -3 [-3]]
+["set" 0 [0]]
+["set" 5 [5]]
+["set" 10 [10]]
+["set" 20 [20]]
+["set" "a" ["a"]]
+["set" "b" ["b"]]
+["set" "c" ["c"]]
+["set" "d" ["d"]]
+
+["yes" "c" ["c"]]
+["yes" "a" ["a"]]
+["yes" 10 [10]]
+["yes" 5 [5]]
+["yes" "b" ["b"]]
+["yes" 20 [20]]
+["yes" "d" ["d"]]
+["yes" 0 [0]]
+["yes" -3 [-3]]
+["no" 2]
+["no" "e"]
+["no" 3]
+["yes" "a" ["a"]]
+["yes" 10 [10]]
+
+["del" 15]
+["del" "A"]
+["del" "e"]
+["del" "a"]
+["del" -3]
+["del" "d"]
+["del" "a"]
+
+count = 6
+["set" 0 [0]]
+["set" 5 [5]]
+["set" 10 [10]]
+["set" 20 [20]]
+["set" "b" ["b"]]
+["set" "c" ["c"]]
+
+["del" "b"]
+["del" 10]
+["del" 10]
+["del" 25]
+["del" "a"]
+["del" 20]
+
+count = 3
+["set" 0 [0]]
+["set" 5 [5]]
+["set" "c" ["c"]]
+
+["del" 0]
+["del" 5]
+["del" "c"]
+
+count = 0
+~
+\err=
+~
+~
+\status=0

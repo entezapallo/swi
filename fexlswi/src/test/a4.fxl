@@ -1,0 +1,15 @@
+#
+show_benchmark;
+
+\\run=
+	(
+	(@\\loop\x
+	ge x 1000000 ();
+	loop (+ 1 x)
+	) 1
+	)
+
+# Runs in constant space as expected.
+say "["
+run
+say "]"

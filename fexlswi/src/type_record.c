@@ -1,0 +1,533 @@
+#include <str.h>
+#include <value.h>
+
+#include <basic.h>
+#include <memory.h>
+#include <type_num.h>
+#include <type_record.h>
+#include <type_str.h>
+
+static void drop_items(struct record *rec)
+	{
+	unsigned long i;
+	for (i = 0; i < rec->count; i++)
+		{
+		struct item *item = rec->vec + i;
+		drop(item->key);
+		drop(item->val);
+		}
+	}
+
+static void clear_record(value f)
+	{
+	struct record *rec = f->v_ptr;
+	drop_items(rec);
+	free_memory(rec->vec, sizeof(struct item[rec->size]));
+	free_memory(rec,sizeof(struct record));
+	}
+
+static int key_cmp(value x, value y)
+	{
+	if (x->T == type_str)
+		{
+		if (y->T == type_str)
+			return str_cmp(x->v_ptr,y->v_ptr);
+		else
+			return 1;
+		}
+	else
+		{
+		if (y->T == type_num)
+			return num_cmp(x->v_double,y->v_double);
+		else
+			return -1;
+		}
+	}
+
+struct search
+	{
+	unsigned long pos;
+	struct item *item;
+	int cmp;
+	};
+
+static struct search find_key(struct record *rec, value key)
+	{
+	unsigned long lo = 0;
+	unsigned long hi = rec->count;
+	unsigned long pos = hi;
+	struct item *item = 0;
+	int cmp = 1;
+
+	while (lo < hi)
+		{
+		unsigned long i = lo + ((hi - lo) / 2);
+		item = rec->vec + i;
+		cmp = key_cmp(key,item->key);
+		if (cmp > 0)
+			lo = i + 1;
+		else
+			{
+			pos = i;
+			if (cmp < 0)
+				hi = i;
+			else
+				break;
+			}
+		}
+	return (struct search){pos, item, cmp};
+	}
+
+value record_find(value obj, value key)
+	{
+	struct search search = find_key(obj->v_ptr,key);
+	if (search.cmp == 0)
+		return search.item->val;
+	else
+		return 0;
+	}
+
+value type_record(value f)
+	{
+	value key = arg(f->R);
+	if (key->T == type_str || key->T == type_num)
+		{
+		value val = record_find(f->L,key);
+		if (val == 0) val = Qvoid;
+		f = hold(val);
+		}
+	else
+		f = hold(Qvoid);
+	drop(key);
+	return f;
+	}
+
+static value Qrecord(struct record *rec)
+	{
+	static struct value clear = {{.N=0}, {.clear=clear_record}};
+	return V(type_record,&clear,(value)rec);
+	}
+
+static struct record *new_record(unsigned long count, unsigned long size)
+	{
+	struct record *rec = new_memory(sizeof(struct record));
+	rec->count = count;
+	rec->size = size;
+	rec->vec = new_memory(sizeof(struct item[size]));
+	return rec;
+	}
+
+static unsigned long calc_size(unsigned long count)
+	{
+	unsigned long extra = count >> 1;
+	const unsigned long min = 5;
+	if (extra < min) extra = min;
+	return count + extra;
+	}
+
+static void bump(struct record *old_rec)
+	{
+	// LATER 20241119 Use realloc
+	unsigned long count = old_rec->count;
+	unsigned long size = calc_size(count+1);
+	struct item *new_vec = new_memory(sizeof(struct item[size]));
+	struct item *old_vec = old_rec->vec;
+	unsigned long i;
+
+	for (i = 0; i < count; i++)
+		new_vec[i] = old_vec[i];
+
+	free_memory(old_vec, sizeof(struct item[old_rec->size]));
+
+	old_rec->size = size;
+	old_rec->vec = new_vec;
+	}
+
+static void shift_up(struct item *vec, unsigned long n, unsigned long pos)
+	{
+	unsigned long i;
+	for (i = n; i > pos; i--)
+		vec[i] = vec[i-1];
+	}
+
+static struct item *insert(struct record *rec, unsigned long pos)
+	{
+	if (rec->count >= rec->size)
+		bump(rec);
+
+	shift_up(rec->vec,rec->count,pos);
+	rec->count++;
+	return rec->vec + pos;
+	}
+
+void record_set(value obj, value key, value val)
+	{
+	struct record *rec = obj->v_ptr;
+	struct search search = find_key(rec,key);
+
+	if (search.cmp == 0)
+		{
+		// Change the value.
+		drop(search.item->val);
+		}
+	else
+		{
+		// Insert new item.
+		search.item = insert(rec,search.pos);
+		search.item->key = hold(key);
+		}
+	search.item->val = val;
+	}
+
+static void shift_down(struct item *vec, unsigned long n, unsigned long pos)
+	{
+	unsigned long i;
+	for (i = pos; i < n; i++)
+		vec[i] = vec[i+1];
+	}
+
+static void record_del(value obj, value key)
+	{
+	struct record *rec = obj->v_ptr;
+	struct search search = find_key(rec,key);
+
+	if (search.cmp == 0)
+		{
+		drop(search.item->key);
+		drop(search.item->val);
+
+		shift_down(rec->vec,rec->count,search.pos);
+		rec->count--;
+		}
+	}
+
+value record_copy(value obj)
+	{
+	struct record *old_rec = obj->v_ptr;
+	unsigned long count = old_rec->count;
+	struct record *new_rec = new_record(count,old_rec->size);
+	struct item *old_vec = old_rec->vec;
+	struct item *new_vec = new_rec->vec;
+	unsigned long i;
+
+	for (i = 0; i < count; i++)
+		{
+		struct item *old_item = old_vec+i;
+		struct item *new_item = new_vec+i;
+		new_item->key = hold(old_item->key);
+		new_item->val = hold(old_item->val);
+		}
+
+	return Qrecord(new_rec);
+	}
+
+// Return an empty record.
+value record_empty(void)
+	{
+	unsigned long count = 0;
+	unsigned long size = calc_size(count);
+	return Qrecord(new_record(count,size));
+	}
+
+static value type_empty(value f)
+	{
+	return record_empty();
+	(void)f;
+	}
+
+static value op_set(value f, value op(value))
+	{
+	if (f->L->L == 0) return keep(f);
+	if (f->L->L->L == 0) return keep(f);
+	{
+	value obj = arg(f->L->L->R);
+	if (obj->T == type_record)
+		{
+		value key = arg(f->L->R);
+		if (key->T == type_str || key->T == type_num)
+			{
+			record_set(obj,key,op(f->R));
+			f = hold(QI);
+			}
+		else
+			f = hold(Qvoid);
+		drop(key);
+		}
+	else
+		f = hold(Qvoid);
+	drop(obj);
+	return f;
+	}
+	}
+
+// (set obj key val) Set key to val in obj, after evaluating val.
+static value type_set(value f)
+	{
+	return op_set(f,arg);
+	}
+
+// (setf obj key val) Set key to val in obj, without evaluating val.
+static value type_setf(value f)
+	{
+	return op_set(f,hold);
+	}
+
+// (del obj key) Delete key from obj.
+static value type_del(value f)
+	{
+	if (f->L->L == 0) return keep(f);
+	{
+	value obj = arg(f->L->R);
+	if (obj->T == type_record)
+		{
+		value key = arg(f->R);
+		if (key->T == type_str || key->T == type_num)
+			{
+			record_del(obj,key);
+			f = hold(QI);
+			}
+		else
+			f = hold(Qvoid);
+		drop(key);
+		}
+	else
+		f = hold(Qvoid);
+	drop(obj);
+	return f;
+	}
+	}
+
+// (get obj key) Look up key in record and return either no or (yes val).
+static value type_get(value f)
+	{
+	if (f->L->L == 0) return keep(f);
+	{
+	value obj = arg(f->L->R);
+	if (obj->T == type_record)
+		{
+		value key = arg(f->R);
+		if (key->T == type_str || key->T == type_num)
+			f = maybe(record_find(obj,key));
+		else
+			f = hold(Qvoid);
+		drop(key);
+		}
+	else
+		f = hold(Qvoid);
+	drop(obj);
+	return f;
+	}
+	}
+
+static value type_record_copy(value f)
+	{
+	value obj = arg(f->R);
+	if (obj->T == type_record)
+		f = record_copy(obj);
+	else
+		f = hold(Qvoid);
+	drop(obj);
+	return f;
+	}
+
+// Return the number of items in the record.
+static value type_record_count(value f)
+	{
+	value obj = arg(f->R);
+	if (obj->T == type_record)
+		f = Qnum((double)((struct record *)obj->v_ptr)->count);
+	else
+		f = hold(Qvoid);
+	drop(obj);
+	return f;
+	}
+
+// (record_item obj pos) Return the {key val} pair in record obj at offset pos,
+// starting at zero.
+static value type_record_item(value f)
+	{
+	if (f->L->L == 0) return keep(f);
+	{
+	value obj = arg(f->L->R);
+	if (obj->T == type_record)
+		{
+		value vpos = arg(f->R);
+		if (vpos->T == type_num)
+			{
+			struct record *rec = obj->v_ptr;
+			unsigned long pos = get_ulong(vpos);
+			if (pos < rec->count)
+				{
+				struct item *item = rec->vec+pos;
+				f = pair(hold(item->key),hold(item->val));
+				}
+			else
+				f = hold(Qvoid);
+			}
+		else
+			f = hold(Qvoid);
+		drop(vpos);
+		}
+	else
+		f = hold(Qvoid);
+	drop(obj);
+	return f;
+	}
+	}
+
+/*
+(fetch v k x)
+Return the value at key k in index v.  If no value, store the value of x in
+the index so you get the same value next time.
+
+\fetch=
+	(\v\k\\x
+	get v k
+		(
+		\x=x
+		setf v k x
+		x
+		)
+		()
+	)
+*/
+static value type_fetch(value f)
+	{
+	if (f->L->L == 0) return keep(f);
+	if (f->L->L->L == 0) return keep(f);
+	{
+	value v = arg(f->L->L->R);
+	if (v->T == type_record)
+		{
+		value k = arg(f->L->R);
+		value y = record_find(v,k);
+		if (y)
+			f = hold(y);
+		else
+			{
+			f = arg(f->R);
+			record_set(v,k,hold(f));
+			}
+		drop(k);
+		}
+	else
+		f = hold(Qvoid);
+	drop(v);
+	return f;
+	}
+	}
+
+// Fill a record from a list of lists, e.g. [["a" 1] ["b" 2]].
+void record_fill(value obj, value list)
+	{
+	while (list->T == type_list)
+		{
+		value head = arg(list->L);
+		value tail = arg(list->R);
+		if (head->T == type_list)
+			{
+			value key = arg(head->L);
+			if (key->T == type_str || key->T == type_num)
+				{
+				value args = arg(head->R);
+				if (args->T == type_list)
+					record_set(obj,key,hold(args->L));
+				drop(args);
+				}
+			drop(key);
+			}
+
+		drop(head);
+		drop(list);
+		list = tail;
+		}
+	drop(list);
+	}
+
+static value type_record_fill(value f)
+	{
+	if (f->L->L == 0) return keep(f);
+	{
+	value obj = arg(f->L->R);
+	if (obj->T == type_record)
+		{
+		value list = arg(f->R);
+		record_fill(obj,list);
+		f = hold(QI);
+		}
+	else
+		f = hold(Qvoid);
+	drop(obj);
+	return f;
+	}
+	}
+
+static value rmod(value obj, value key, value val, value fn)
+	{
+	struct record *rec = obj->v_ptr;
+	struct search search = find_key(rec,key);
+	unsigned long pos = search.pos;
+
+	if (search.cmp == 0)
+		val = search.item->val;
+	else
+		{
+		struct item *item = insert(rec,pos);
+		item->key = hold(key);
+		item->val = hold(Qvoid);
+		}
+
+	val = eval(A(hold(fn),hold(val)));
+
+	if (pos < rec->count)
+		{
+		struct item *item = rec->vec + pos;
+		hold(val);
+		drop(item->val);
+		item->val = val;
+		}
+	return val;
+	}
+
+// \x=(rmod obj key val fn)
+// Modify the record key by applying fn to its current value, with default val.
+static value type_rmod(value f)
+	{
+	if (f->L->L == 0) return keep(f);
+	if (f->L->L->L == 0) return keep(f);
+	if (f->L->L->L->L == 0) return keep(f);
+	{
+	value obj = arg(f->L->L->L->R);
+	if (obj->T == type_record)
+		{
+		value key = arg(f->L->L->R);
+		if (key->T == type_str || key->T == type_num)
+			f = rmod(obj,key,f->L->R,f->R);
+		else
+			f = hold(Qvoid);
+		drop(key);
+		}
+	else
+		f = hold(Qvoid);
+	drop(obj);
+	return f;
+	}
+	}
+
+value type_load_record(value f)
+	{
+	define("empty",Q0(type_empty));
+	define("set",Q(type_set));
+	define("setf",Q(type_setf));
+	define("del",Q(type_del));
+	define("get",Q(type_get));
+	// LATER 20260919 record_clear
+	define("record_copy",Q(type_record_copy));
+	define("record_count",Q(type_record_count));
+	define("record_item",Q(type_record_item));
+	define("fetch",Q(type_fetch));
+	define("record_fill",Q(type_record_fill));
+	define("rmod",Q(type_rmod));
+	return hold(QI);
+	(void)f;
+	}
