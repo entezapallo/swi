@@ -1,20 +1,22 @@
-; fexl/aot.ll — prototipo AOT ( ahead-of-time ) del Paso 1.
+; fexl/aot.ll — AOT madurado del Paso 1.
 ;
-; Detector automatico: recorre el grafo de un valor y decide si es apto para
-; evaluacion especializada. Condiciones: profundidad acotada (32), ningun
-; tipo dinamico (evaluate / load_* ) y todos los T conocidos.
-; Escape: @aot fuerza, @noaot fuerza interpretacion.
-; Fallback: si un guard falla, se cae a eval(hold(f)) del intérprete.
+; Detector automatico: recorre el grafo (profundidad <= 32, solo arboles) y
+; rechaza cualquier tipo dinamico de la tabla @dynamic_types (evaluate y
+; todos los load_*). Escapes: @aot fuerza la via rapida, @noaot fuerza el
+; interprete. Fallback: eval(hold(f)) / step(f) segun el punto de entrada.
 ;
-; La via rapida llama directo al reductor (g->T(f)) sin el trampolin step,
-; preservando hold/drop. Es la semilla para la generacion de IR especializado.
+; @aot_enabled conecta la via rapida al dispatch de eval en value.ll.
+; Default 0: el comportamiento existente no cambia. Se prende con (aot_on).
 
-@QI = external global ptr
+@QI          = external global ptr
+@aot_enabled = global i32 0
 
 declare ptr  @eval(ptr)
+declare ptr  @step(ptr)
 declare ptr  @hold(ptr)
 declare void @drop(ptr)
 
+; ---- tipos dinamicos (evaluate + todos los load_*) ------------------------
 declare ptr @type_evaluate(ptr)
 declare ptr @type_load_argv(ptr)
 declare ptr @type_load_basic(ptr)
@@ -47,11 +49,21 @@ declare ptr @type_load_time(ptr)
 declare ptr @type_load_tuple(ptr)
 declare ptr @type_load_var(ptr)
 
-@.aot_depth = private constant [5 x i8] c"@aot\00"
-@.noaot_depth = private constant [7 x i8] c"@noaot\00"
+@dynamic_types = private constant [31 x ptr] [
+  ptr @type_evaluate,
+  ptr @type_load_argv,   ptr @type_load_basic,  ptr @type_load_bn,
+  ptr @type_load_buf,    ptr @type_load_cmp,    ptr @type_load_crypto,
+  ptr @type_load_extend, ptr @type_load_fexl,   ptr @type_load_file,
+  ptr @type_load_hex,    ptr @type_load_istr,   ptr @type_load_limit,
+  ptr @type_load_main,   ptr @type_load_math,   ptr @type_load_num,
+  ptr @type_load_output, ptr @type_load_parse,  ptr @type_load_rand,
+  ptr @type_load_record, ptr @type_load_regex,  ptr @type_load_script,
+  ptr @type_load_run,    ptr @type_load_signal, ptr @type_load_str,
+  ptr @type_load_stream, ptr @type_load_sym,    ptr @type_load_test,
+  ptr @type_load_time,   ptr @type_load_tuple,  ptr @type_load_var
+]
 
-; ---- detector automatico -------------------------------------------------
-; Devuelve 1 si el arbol es apto, 0 si contiene algo dinamico/desconocido.
+; ---- detector -------------------------------------------------------------
 define private i32 @aot_probe(ptr %f, i64 %depth) {
 entry:
   %lim = icmp sgt i64 %depth, 32
@@ -60,21 +72,27 @@ check:
   %tp = getelementptr %value, ptr %f, i32 0, i32 1
   %t = load ptr, ptr %tp
   %null = icmp eq ptr %t, null
-  br i1 %null, label %recurse, label %known
-known:
-  ; tipos dinamicos -> no apto
-  %d0 = icmp eq ptr %t, @type_evaluate
-  %d1 = icmp eq ptr %t, @type_load_main
-  %dyn = or i1 %d0, %d1
-  br i1 %dyn, label %fail, label %recurse
+  br i1 %null, label %recurse, label %scandyn
+scandyn:
+  br label %dynloop
+dynloop:
+  %i = phi i64 [ 0, %scandyn ], [ %i1, %dynnext ]
+  %cont = icmp ult i64 %i, 31
+  br i1 %cont, label %dynbody, label %recurse
+dynbody:
+  %slot = getelementptr [31 x ptr], ptr @dynamic_types, i64 0, i64 %i
+  %dt = load ptr, ptr %slot
+  %eq = icmp eq ptr %t, %dt
+  br i1 %eq, label %fail, label %dynnext
+dynnext:
+  %i1 = add i64 %i, 1
+  br label %dynloop
 recurse:
   %lp = getelementptr %value, ptr %f, i32 0, i32 2
   %L = load ptr, ptr %lp
   %hasL = icmp ne ptr %L, null
   br i1 %hasL, label %checkdata, label %okay
 checkdata:
-  ; Si f->L->N == 0 es un data value: su R es un puntero opaco
-  ; (string/FILE*/bn), no un value. No recorrer.
   %LNp = getelementptr %value, ptr %L, i32 0, i32 0
   %LN = load i64, ptr %LNp
   %isdata = icmp eq i64 %LN, 0
@@ -100,42 +118,90 @@ fail:
   ret i32 0
 }
 
-; ---- via rapida ----------------------------------------------------------
-; f = A(g, x) con g reductor puro conocido. Llama g(f) directo.
-define private ptr @aot_step(ptr %f) {
+; ---- via rapida -----------------------------------------------------------
+; g->T != 0: llama directo al reductor. Si no, delega en step() (no en eval,
+; para no reentrar en el dispatch con el flag prendido).
+define ptr @aot_step_fast(ptr %f) {
 entry:
   %Lp = getelementptr %value, ptr %f, i32 0, i32 2
   %g = load ptr, ptr %Lp
+  %gnull = icmp eq ptr %g, null
+  br i1 %gnull, label %delegate, label %checkT
+checkT:
   %Tptr = getelementptr %value, ptr %g, i32 0, i32 1
   %T = load ptr, ptr %Tptr
   %null = icmp eq ptr %T, null
-  br i1 %null, label %fallback, label %direct
+  br i1 %null, label %delegate, label %direct
 direct:
-  ; Igual que step(): el reductor no suelta f, lo hacemos aca.
   %r = call ptr %T(ptr %f)
   call void @drop(ptr %f)
   ret ptr %r
-fallback:
-  ; f ya tiene el hold que hizo aot_eval; eval lo consume via step().
-  %r2 = call ptr @eval(ptr %f)
+delegate:
+  %r2 = call ptr @step(ptr %f)
   ret ptr %r2
 }
 
-; ---- entrada publica -----------------------------------------------------
-; (aot_eval x) intenta la via rapida; si el detector dice no, interpreta.
-define ptr @aot_eval(ptr %f) {
+; ---- entradas publicas ----------------------------------------------------
+; modos: 0 = auto (detector), 1 = forzar rapida (@aot), 2 = forzar interpreter (@noaot)
+define private ptr @aot_run(ptr %f, i32 %mode) {
 entry:
   %rp = getelementptr %value, ptr %f, i32 0, i32 3
   %rv = load ptr, ptr %rp
+  %isauto = icmp eq i32 %mode, 0
+  br i1 %isauto, label %detect, label %modechk
+detect:
   %ok = call i32 @aot_probe(ptr %rv, i64 0)
   %eligible = icmp eq i32 %ok, 1
   br i1 %eligible, label %fast, label %interp
+modechk:
+  %isskip = icmp eq i32 %mode, 2
+  br i1 %isskip, label %interp, label %fast
 fast:
+  ; Si rv ya es un valor (T != 0), devolverlo con hold: step() soltara f.
+  %rtp = getelementptr %value, ptr %rv, i32 0, i32 1
+  %rt = load ptr, ptr %rtp
+  %isapp = icmp eq ptr %rt, null
+  br i1 %isapp, label %callfast, label %doneval
+doneval:
+  %hv = call ptr @hold(ptr %rv)
+  ret ptr %hv
+callfast:
   %h = call ptr @hold(ptr %rv)
-  %r = call ptr @aot_step(ptr %h)
+  %r = call ptr @aot_step_fast(ptr %h)
   ret ptr %r
 interp:
   %h2 = call ptr @hold(ptr %rv)
   %r2 = call ptr @eval(ptr %h2)
   ret ptr %r2
+}
+
+define ptr @aot_eval(ptr %f) {
+entry:
+  %r = call ptr @aot_run(ptr %f, i32 0)
+  ret ptr %r
+}
+define ptr @aot_force(ptr %f) {
+entry:
+  %r = call ptr @aot_run(ptr %f, i32 1)
+  ret ptr %r
+}
+define ptr @aot_skip(ptr %f) {
+entry:
+  %r = call ptr @aot_run(ptr %f, i32 2)
+  ret ptr %r
+}
+
+define ptr @aot_on(ptr %f) {
+entry:
+  store i32 1, ptr @aot_enabled
+  %qi = load ptr, ptr @QI
+  %h = call ptr @hold(ptr %qi)
+  ret ptr %h
+}
+define ptr @aot_off(ptr %f) {
+entry:
+  store i32 0, ptr @aot_enabled
+  %qi = load ptr, ptr @QI
+  %h = call ptr @hold(ptr %qi)
+  ret ptr %h
 }

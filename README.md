@@ -64,7 +64,9 @@ separado. Si querés reconstruir solo el intérprete,
   `doc_reindex()` es O(n)). Ver `spec.md` y `core/document.ll`.
 - **LLVM + musl**: motor en módulos `.ll`, perfiles `fast`, `opt`, `opt-full` y
   `selfh`, link dinámico contra musl (`-L/usr/lib/x86_64-linux-musl`,
-  `--dynamic-linker`, `-rpath`). Ver `BUILD.md`.
+  `--dynamic-linker`, `-rpath`). Ver `BUILD.md`. El intérprete Fexl también
+  está en IR (`fexl/*.ll`), con AOT opcional: detector automático de valores
+  puros, escapes `@aot`/`@noaot`, `aot_on`/`aot_off` y fallback al intérprete.
 - **Scriptable**: `ui.fxl` controla `CONSOLE_H`, `TABS_COL`, `FILEMAN_W`,
   `STATUS`, `LOG`, `BIND` y los spans `SPANS`; las definiciones de la consola
   persisten en un script de sesión por PID.

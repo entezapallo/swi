@@ -206,8 +206,12 @@ entry:
   ret ptr %x
 }
 
-; step(f) — el corazón del trampolín. Es private; eval() es la entrada C.
-define private ptr @step(ptr %f) {
+declare ptr @aot_step_fast(ptr)
+@aot_enabled = external global i32
+
+; step(f) — el corazón del trampolín. Publico para el AOT (aot_step_fast
+; delega aca cuando la aplicacion no esta lista).
+define ptr @step(ptr %f) {
 entry:
   %Lf = getelementptr %value, ptr %f, i32 0, i32 2
   %g = load ptr, ptr %Lf
@@ -266,18 +270,29 @@ call:
   ret ptr %r
 }
 
-; eval(f): mientras f->T == 0, step().
+; eval(f): mientras f->T == 0, step(). Si @aot_enabled, usa la via rapida
+; del AOT (default 0, comportamiento original).
 define ptr @eval(ptr %f) {
 entry:
   br label %loop
 loop:
-  %fp = phi ptr [ %f, %entry ], [ %next, %again ]
+  %fp = phi ptr [ %f, %entry ], [ %next, %steptime ]
   %Tp = getelementptr %value, ptr %fp, i32 0, i32 1
   %T = load ptr, ptr %Tp
   %isapp = icmp eq ptr %T, null
   br i1 %isapp, label %again, label %done
 again:
-  %next = call ptr @step(ptr %fp)
+  %flagon = load i32, ptr @aot_enabled
+  %useaot = icmp ne i32 %flagon, 0
+  br i1 %useaot, label %aotstep, label %normstep
+aotstep:
+  %ra = call ptr @aot_step_fast(ptr %fp)
+  br label %steptime
+normstep:
+  %rn = call ptr @step(ptr %fp)
+  br label %steptime
+steptime:
+  %next = phi ptr [ %ra, %aotstep ], [ %rn, %normstep ]
   br label %loop
 done:
   ret ptr %fp

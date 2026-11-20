@@ -20,6 +20,10 @@ void die(const char *msg) {
 void fput(void *fh, const char *data) { (void)fh; (void)data; }
 void fput_ulong(void *fh, uint64_t x) { (void)fh; (void)x; }
 
+/* stubs del AOT: el flag esta apagado, aot_step_fast nunca se llama */
+int aot_enabled = 0;
+void *aot_step_fast(void *f) { (void)f; return 0; }
+
 static int g_pass = 0, g_fail = 0;
 #define CHECK(c, m) do { \
     if (c) { printf("  OK   - %s\n", m); g_pass++; } \

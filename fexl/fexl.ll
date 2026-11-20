@@ -36,6 +36,10 @@
 @.s_load_tuple   = private constant [11 x i8] c"load_tuple\00"
 @.s_load_var     = private constant [9 x i8] c"load_var\00"
 @.s_aot          = private constant [9 x i8] c"aot_eval\00"
+@.s_aot_force    = private constant [5 x i8] c"@aot\00"
+@.s_aot_skip     = private constant [7 x i8] c"@noaot\00"
+@.s_aot_on       = private constant [7 x i8] c"aot_on\00"
+@.s_aot_off      = private constant [8 x i8] c"aot_off\00"
 
 declare ptr  @Q(ptr)
 declare ptr  @Q0(ptr)
@@ -93,6 +97,10 @@ declare ptr @type_load_time(ptr)
 declare ptr @type_load_tuple(ptr)
 declare ptr @type_load_var(ptr)
 declare ptr @aot_eval(ptr)
+declare ptr @aot_force(ptr)
+declare ptr @aot_skip(ptr)
+declare ptr @aot_on(ptr)
+declare ptr @aot_off(ptr)
 
 define private void @beg_const() {
 entry:
@@ -186,6 +194,14 @@ entry:
   call void @define(ptr @.s_load_var, ptr %q30)
   %qa = call ptr @Q(ptr @aot_eval)
   call void @define(ptr @.s_aot, ptr %qa)
+  %qaf = call ptr @Q(ptr @aot_force)
+  call void @define(ptr @.s_aot_force, ptr %qaf)
+  %qas = call ptr @Q(ptr @aot_skip)
+  call void @define(ptr @.s_aot_skip, ptr %qas)
+  %qaon = call ptr @Q0(ptr @aot_on)
+  call void @define(ptr @.s_aot_on, ptr %qaon)
+  %qaoff = call ptr @Q0(ptr @aot_off)
+  call void @define(ptr @.s_aot_off, ptr %qaoff)
   ret void
 }
 
