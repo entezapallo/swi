@@ -32,6 +32,18 @@
 #define SWI_UI_SCRIPT "ui.fxl"
 #endif
 
+/* Ruta del script de UI: SWI_UI la puede overridear sin recompilar. Se
+ * resuelve una sola vez para que el hot reload vigile siempre el mismo
+ * archivo. */
+static const char *ui_script_path(void) {
+    static const char *path;
+    if (path == NULL) {
+        const char *env = getenv("SWI_UI");
+        path = (env != NULL && *env != '\0') ? env : SWI_UI_SCRIPT;
+    }
+    return path;
+}
+
 #define SWI_SESSION_DIR  "/tmp/swi"
 #define SWI_SESSION_PATH "/tmp/swi/session"
 #define SWI_KIND_EDITOR  69
@@ -153,13 +165,13 @@ int main(int argc, char **argv)
     /* driver Fexl persistente: dueño del layout y de los atajos */
     memset(&g_ui, 0, sizeof(g_ui));
     g_ui.console_h = 3;
-    if (!fexl_ui_start(SWI_FEXL_BIN, SWI_UI_SCRIPT))
+    if (!fexl_ui_start(SWI_FEXL_BIN, ui_script_path()))
         fprintf(stderr, "swi: driver Fexl no disponible; layout por defecto\n");
     else
         shell_ui_sync(FUI_INIT, 3, 0, 0);
     {
         struct stat sb;
-        if (stat(SWI_UI_SCRIPT, &sb) == 0) {
+        if (stat(ui_script_path(), &sb) == 0) {
             g_script_mtime = sb.st_mtime;
             g_script_mtime_ns = sb.st_mtim.tv_nsec;
         }
@@ -196,7 +208,7 @@ int main(int argc, char **argv)
         {
             struct stat sb;
             int changed = 0;
-            if (stat(SWI_UI_SCRIPT, &sb) == 0) {
+            if (stat(ui_script_path(), &sb) == 0) {
                 changed = (sb.st_mtime != g_script_mtime ||
                            sb.st_mtim.tv_nsec != g_script_mtime_ns);
                 g_script_mtime = sb.st_mtime;
@@ -204,7 +216,7 @@ int main(int argc, char **argv)
             }
             if (changed) {
                 fexl_ui_stop();
-                if (fexl_ui_start(SWI_FEXL_BIN, SWI_UI_SCRIPT)) {
+                if (fexl_ui_start(SWI_FEXL_BIN, ui_script_path())) {
                     shell_ui_sync(FUI_INIT, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
                     shell_log_add("ui.fxl recargado");
                 }

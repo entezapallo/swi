@@ -298,9 +298,17 @@ Importante: hoy los BIND son **informativos** para acciones nuevas. Para que
 
 ### Cambiar el script sin recompilar
 
-La ruta va embebida con `UI_SCRIPT_DEF`. Recompilás si querés apuntar a otro
-archivo fijo. Para no recompilar, `main.c` podría usar `getenv("SWI_UI")` con
-default a `SWI_UI_SCRIPT` (no implementado todavía).
+La ruta por default va embebida con `UI_SCRIPT_DEF` (`ui.fxl`). Para apuntar a
+otro script sin recompilar, usá la variable de entorno `SWI_UI`:
+
+```bash
+SWI_UI=/ruta/a/otro.fxl ./build/swi
+```
+
+`main.c` resuelve `SWI_UI` una sola vez al arrancar (con default a
+`SWI_UI_SCRIPT`) y vigila ese mismo archivo para el hot reload. El directorio
+del script debe contener las bibliotecas `.fxl` del runtime en `src/lib`
+relativo al binario `fexlswi0`.
 
 ---
 

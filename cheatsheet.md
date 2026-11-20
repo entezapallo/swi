@@ -84,6 +84,7 @@ make install                 # build/swi + build/fexlswi/
 make test test-opt test-selfh
 make MODE=opt-full test
 make FEXL=/otro/fexlswi0 opt # override del intérprete
+SWI_UI=/otro/ui.fxl ./build/swi  # override del script de UI
 ```
 
 `make opt` (y los otros perfiles) compila `fexlswi-llvm` primero: no hace falta un
