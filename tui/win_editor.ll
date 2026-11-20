@@ -39,6 +39,7 @@ declare ptr @doc_new()
 declare void @doc_destroy(ptr)
 declare i32 @doc_save(ptr, ptr)
 declare i32 @doc_reindex(ptr)
+declare i32 @doc_ensure_index(ptr)
 declare ptr @doc_lineindex(ptr)
 declare i32 @doc_insert(ptr, i64, ptr, i64)
 declare i32 @doc_delete(ptr, i64, i64)
@@ -556,7 +557,7 @@ define internal void @ew_sync(ptr %ed) {
 entry:
   %dp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 0
   %doc = load ptr, ptr %dp
-  %r = call i32 @doc_reindex(ptr %doc)
+  %r = call i32 @doc_ensure_index(ptr %doc)
   call void @ew_clamp_cursor(ptr %ed)
   %cp = getelementptr inbounds %EditorWin, ptr %ed, i32 0, i32 1
   %cur = load i64, ptr %cp

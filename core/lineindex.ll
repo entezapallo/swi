@@ -9,7 +9,7 @@
 ; solo si se mide que hace falta.
 
 %LineEntry = type { i64, i64, i64 }   ; { offset, length (sin \n), flags }
-%LineIndex = type { ptr, i64, i64 }   ; { entries (array de LineEntry), count, capacity }
+%LineIndex = type { ptr, i64, i64, i64 } ; { entries, count, capacity, dirty (0=fresh, 1=rebuild pendiente) }
 
 declare ptr @malloc(i64)
 declare ptr @realloc(ptr, i64)
@@ -22,13 +22,15 @@ declare ptr @tb_data(ptr)
 
 define ptr @li_create() {
 entry:
-  %li = call ptr @malloc(i64 24)   ; { ptr, i64, i64 } = 8+8+8
+  %li = call ptr @malloc(i64 32)   ; { ptr, i64, i64, i64 } = 8*4
   %entries_ptr = getelementptr %LineIndex, ptr %li, i32 0, i32 0
   store ptr null, ptr %entries_ptr
   %count_ptr = getelementptr %LineIndex, ptr %li, i32 0, i32 1
   store i64 0, ptr %count_ptr
   %cap_ptr = getelementptr %LineIndex, ptr %li, i32 0, i32 2
   store i64 0, ptr %cap_ptr
+  %dirty_ptr = getelementptr %LineIndex, ptr %li, i32 0, i32 3
+  store i64 0, ptr %dirty_ptr
   ret ptr %li
 }
 
@@ -176,6 +178,15 @@ entry:
 ; recalcularlos también, li_rebuild no los preserva (evita estado inconsistente
 ; si cambia el número de líneas o su orden).
 ; Devuelve i32 (1=ok, 0=fail por allocación).
+
+; li_clear_dirty: marca el indice como al dia tras un rebuild.
+define internal void @li_clear_dirty(ptr %li) {
+entry:
+  %p = getelementptr %LineIndex, ptr %li, i32 0, i32 3
+  store i64 0, ptr %p
+  ret void
+}
+
 define i32 @li_rebuild(ptr %li, ptr %tb) {
 entry:
   %tblen = call i64 @tb_length(ptr %tb)
@@ -237,6 +248,7 @@ entry:
 set_empty:
   %cpe = getelementptr %LineIndex, ptr %li, i32 0, i32 1
   store i64 0, ptr %cpe
+  call void @li_clear_dirty(ptr %li)
   ret i32 1
 
 count_init:
@@ -304,6 +316,7 @@ fill_merge:
 fill_last:
   %lastlen = sub i64 %len, %fstart
   call void @li_write_entry(ptr %new, i64 %fidx, i64 %fstart, i64 %lastlen)
+  call void @li_clear_dirty(ptr %li)
   ret i32 1
 fail:
   ret i32 0
@@ -398,11 +411,13 @@ fill_last:
   ; última línea: desde %fline_start hasta %tblen (sin '\n' final, o buffer sin '\n' final)
   %flastlen = sub i64 %tblen, %fline_start
   call void @li_write_entry(ptr %new_entries, i64 %fline_idx, i64 %fline_start, i64 %flastlen)
+  call void @li_clear_dirty(ptr %li)
   ret i32 1
 
 set_empty:
   %count_ptr2 = getelementptr %LineIndex, ptr %li, i32 0, i32 1
   store i64 0, ptr %count_ptr2
+  call void @li_clear_dirty(ptr %li)
   ret i32 1
 
 fail:

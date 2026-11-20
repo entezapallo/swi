@@ -9,11 +9,13 @@
 ; - doc_save() escribe chunk por chunk (sin concatenar todo en un buffer).
 ; - li_rebuild_doc() ya lee via doc_read, por lo que el indice no materializa.
 ;
-; Deuda aceptada (no perfecto): find_in_doc y doc_replace_all materializan el
-; documento; el maestro se usa como caché de compatibilidad para llamadores
-; que todavia piden tb_data(doc_textbuffer(doc)); los chunks vacios no se
-; compactan; doc_reindex sigue siendo O(n) por edicion.
+; find_in_doc lee por ventanas y doc_replace_all materializa solo el rango de
+; escaneo: ninguno carga el documento completo. El maestro se usa como caché
+; de compatibilidad para llamadores que todavia piden
+; tb_data(doc_textbuffer(doc)); los chunks vacios no se compactan; doc_reindex
+; sigue siendo O(n) por edicion (ahora diferido, ver mas abajo).
 
+%LineIndex = type { ptr, i64, i64, i64 } ; espejo de core/lineindex.ll (campo 3 = dirty)
 %Document = type { ptr, ptr, ptr, ptr, i64, ptr, i64, i64 }
 ; { TextBuffer* maestro, LineIndex*, History*,
 ;   ptr chunks (head), i64 nchunks, ptr mmap_addr, i64 mmap_len, i64 total_len }
@@ -503,9 +505,45 @@ fail:
 }
 
 ; ---------------------------------------------------------------------------
+
+; find_doc_match_at: comprueba un match en %pos leyendo solo una ventana de
+; %buf (capacidad %cap), reutilizando el rango ya cargado en %vs/%vl. Así
+; find_in_doc no materializa el documento completo.
+define internal i1 @find_doc_match_at(ptr %doc, ptr %needle, i64 %nlen,
+    i64 %pos, i32 %match_case, ptr %vs, ptr %vl, ptr %buf, i64 %cap) {
+entry:
+  %vs0 = load i64, ptr %vs
+  %vl0 = load i64, ptr %vl
+  %end = add i64 %pos, %nlen
+  %vend = add i64 %vs0, %vl0
+  %ge = icmp sge i64 %pos, %vs0
+  %le = icmp sle i64 %end, %vend
+  %covers = and i1 %ge, %le
+  br i1 %covers, label %match, label %reload
+reload:
+  %len = call i64 @doc_length(ptr %doc)
+  %avail = sub i64 %len, %pos
+  %cmpsmall = icmp ult i64 %cap, %avail
+  %want = select i1 %cmpsmall, i64 %cap, i64 %avail
+  store i64 %pos, ptr %vs
+  store i64 %want, ptr %vl
+  %got = call i64 @doc_read(ptr %doc, i64 %pos, i64 %want, ptr %buf)
+  %enough = icmp sge i64 %got, %nlen
+  br i1 %enough, label %match, label %nomatch
+match:
+  %start = load i64, ptr %vs
+  %off = sub i64 %pos, %start
+  %hp = getelementptr i8, ptr %buf, i64 %off
+  %m = call i1 @find_bytes_match(ptr %hp, ptr %needle, i64 %nlen, i32 %match_case)
+  ret i1 %m
+nomatch:
+  ret i1 0
+}
+
 ; find_in_doc: busqueda literal sobre el Document (multi-chunk), via doc_read.
-; POC: materializa el documento una vez con doc_read (igual que li_rebuild_doc
-; hacia antes) y reutiliza find_bytes_match de find.ll. Devuelve 1 si encontro
+; Lee por ventanas de 4096 bytes (o nlen si es mayor) con find_doc_match_at,
+; sin materializar el documento. reutiliza find_bytes_match de find.ll.
+; Devuelve 1 si encontro
 ; y escribe [out_start,out_end); 0 si no.
 ; forward != 0 = adelante con wraparound; == 0 = atras.
 ; ---------------------------------------------------------------------------
@@ -519,17 +557,22 @@ entry:
   %bad = or i1 %nempty, %toobig
   br i1 %bad, label %no, label %alloc
 alloc:
-  %buf = call ptr @malloc(i64 %len)
+  %big = icmp ugt i64 %nlen, 4096
+  %cap = select i1 %big, i64 %nlen, i64 4096
+  %buf = call ptr @malloc(i64 %cap)
   %null = icmp eq ptr %buf, null
-  br i1 %null, label %no, label %read
-read:
-  %got = call i64 @doc_read(ptr %doc, i64 0, i64 %len, ptr %buf)
+  br i1 %null, label %no, label %win_init
+win_init:
+  %vs = alloca i64
+  %vl = alloca i64
+  store i64 -1, ptr %vs
+  store i64 0, ptr %vl
   %fwd = icmp ne i32 %forward, 0
   br i1 %fwd, label %fw1_setup, label %bw1_setup
 
 ; ---- forward fase 1: [from, maxs] ----
 fw1_setup:
-  %maxs = sub i64 %got, %nlen
+  %maxs = sub i64 %len, %nlen
   %frombig = icmp ugt i64 %from, %maxs
   %s1 = select i1 %frombig, i64 0, i64 %from
   br label %fw1_loop
@@ -538,8 +581,7 @@ fw1_loop:
   %done1 = icmp ugt i64 %p1, %maxs
   br i1 %done1, label %fw2_setup, label %fw1_check
 fw1_check:
-  %hp1 = getelementptr i8, ptr %buf, i64 %p1
-  %m1 = call i1 @find_bytes_match(ptr %hp1, ptr %needle, i64 %nlen, i32 %match_case)
+  %m1 = call i1 @find_doc_match_at(ptr %doc, ptr %needle, i64 %nlen, i64 %p1, i32 %match_case, ptr %vs, ptr %vl, ptr %buf, i64 %cap)
   br i1 %m1, label %found, label %fw1_next
 fw1_next:
   %p1next = add i64 %p1, 1
@@ -554,8 +596,7 @@ fw2_loop:
   %done2 = icmp sge i64 %p2, %from
   br i1 %done2, label %no_cleanup, label %fw2_check
 fw2_check:
-  %hp2 = getelementptr i8, ptr %buf, i64 %p2
-  %m2 = call i1 @find_bytes_match(ptr %hp2, ptr %needle, i64 %nlen, i32 %match_case)
+  %m2 = call i1 @find_doc_match_at(ptr %doc, ptr %needle, i64 %nlen, i64 %p2, i32 %match_case, ptr %vs, ptr %vl, ptr %buf, i64 %cap)
   br i1 %m2, label %found2, label %fw2_next
 fw2_next:
   %p2next = add i64 %p2, 1
@@ -563,14 +604,13 @@ fw2_next:
 
 ; ---- backward fase 1: [from, 0] ----
 bw1_setup:
-  %maxs_b = sub i64 %got, %nlen
+  %maxs_b = sub i64 %len, %nlen
   %frombig_b = icmp ugt i64 %from, %maxs_b
   %s1_b = select i1 %frombig_b, i64 %maxs_b, i64 %from
   br label %bw1_loop
 bw1_loop:
   %pb1 = phi i64 [ %s1_b, %bw1_setup ], [ %pb1next, %bw1_next ]
-  %hp1b = getelementptr i8, ptr %buf, i64 %pb1
-  %mb1 = call i1 @find_bytes_match(ptr %hp1b, ptr %needle, i64 %nlen, i32 %match_case)
+  %mb1 = call i1 @find_doc_match_at(ptr %doc, ptr %needle, i64 %nlen, i64 %pb1, i32 %match_case, ptr %vs, ptr %vl, ptr %buf, i64 %cap)
   br i1 %mb1, label %found_b, label %bw1_check0
 bw1_check0:
   %iszero = icmp eq i64 %pb1, 0
@@ -588,8 +628,7 @@ bw2_loop:
   %doneb2 = icmp sle i64 %pb2, %from
   br i1 %doneb2, label %no_cleanup, label %bw2_check
 bw2_check:
-  %hp2b = getelementptr i8, ptr %buf, i64 %pb2
-  %mb2 = call i1 @find_bytes_match(ptr %hp2b, ptr %needle, i64 %nlen, i32 %match_case)
+  %mb2 = call i1 @find_doc_match_at(ptr %doc, ptr %needle, i64 %nlen, i64 %pb2, i32 %match_case, ptr %vs, ptr %vl, ptr %buf, i64 %cap)
   br i1 %mb2, label %found_b2, label %bw2_next
 bw2_next:
   %pb2next = sub i64 %pb2, 1
@@ -630,14 +669,32 @@ no:
   ret i32 0
 }
 
+; doc_reindex: solo marca el indice como pendiente. El rebuild real se hace
+; en doc_ensure_index, justo antes de que el editor consulte lineas. Asi una
+; rafaga de ediciones no reconstruye el indice O(n) en cada una.
 define i32 @doc_reindex(ptr %doc) {
 entry:
-  %tb_field = getelementptr %Document, ptr %doc, i32 0, i32 0
-  %tb = load ptr, ptr %tb_field
   %li_field = getelementptr %Document, ptr %doc, i32 0, i32 1
   %li = load ptr, ptr %li_field
+  %dirty_ptr = getelementptr %LineIndex, ptr %li, i32 0, i32 3
+  store i64 1, ptr %dirty_ptr
+  ret i32 1
+}
+
+; doc_ensure_index: reconstruye el indice solo si esta marcado como pendiente.
+define i32 @doc_ensure_index(ptr %doc) {
+entry:
+  %li_field = getelementptr %Document, ptr %doc, i32 0, i32 1
+  %li = load ptr, ptr %li_field
+  %dirty_ptr = getelementptr %LineIndex, ptr %li, i32 0, i32 3
+  %dirty = load i64, ptr %dirty_ptr
+  %need = icmp ne i64 %dirty, 0
+  br i1 %need, label %rebuild, label %done
+rebuild:
   %ok = call i32 @li_rebuild_doc(ptr %li, ptr %doc)
   ret i32 %ok
+done:
+  ret i32 1
 }
 
 define ptr @doc_textbuffer(ptr %doc) {
@@ -938,12 +995,17 @@ entry:
   br i1 %prog_null, label %fail_null, label %setup
 
 setup:
-  ; Deuda aceptada: materializa el documento via doc_read (el maestro esta
-  ; vacio en cargas lazy). Los resultados se aplican luego con doc_delete /
-  ; doc_insert sobre los chunks.
-  %text_len = call i64 @doc_length(ptr %doc)
-  %text = call ptr @malloc(i64 %text_len)
-  %got = call i64 @doc_read(ptr %doc, i64 0, i64 %text_len, ptr %text)
+  ; Solo se materializa el rango de escaneo (60 lineas, ver chunk_plan.ll),
+  ; no el documento completo. Los offsets que devuelve replace_all son
+  ; relativos a este buffer; se rebasan con scan_start al aplicar.
+  %span_len = sub i64 %scan_end, %scan_start
+  %text = call ptr @malloc(i64 %span_len)
+  %nulltext = icmp eq ptr %text, null
+  br i1 %nulltext, label %fail, label %readspan
+readspan:
+  %got = call i64 @doc_read(ptr %doc, i64 %scan_start, i64 %span_len, ptr %text)
+  %core_rel = sub i64 %core_start, %scan_start
+  %core_end_rel = sub i64 %core_end, %scan_start
 
   %starts_slot = alloca ptr
   %ends_slot = alloca ptr
@@ -956,10 +1018,10 @@ setup:
   store ptr null, ptr %repl_lens_slot
   store i64 0, ptr %count_slot
 
-  %rc = call i32 @replace_all(ptr %text, i64 %text_len, ptr %prog,
+  %rc = call i32 @replace_all(ptr %text, i64 %got, ptr %prog,
                                ptr %replacement_template, i64 %replacement_len,
-                               i64 %core_start, i64 %core_end,
-                               i64 %scan_start, i64 %scan_end,
+                               i64 %core_rel, i64 %core_end_rel,
+                               i64 0, i64 %span_len,
                                ptr %starts_slot, ptr %ends_slot,
                                ptr %repls_slot, ptr %repl_lens_slot,
                                ptr %count_slot)
@@ -992,8 +1054,9 @@ apply_body:
   %repl_len = load i64, ptr %rl_slot
   %match_len = sub i64 %match_end, %match_start
 
-  %del_ok = call i32 @doc_delete(ptr %doc, i64 %match_start, i64 %match_len)
-  %ins_ok = call i32 @doc_insert(ptr %doc, i64 %match_start, ptr %repl, i64 %repl_len)
+  %abs_start = add i64 %match_start, %scan_start
+  %del_ok = call i32 @doc_delete(ptr %doc, i64 %abs_start, i64 %match_len)
+  %ins_ok = call i32 @doc_insert(ptr %doc, i64 %abs_start, ptr %repl, i64 %repl_len)
 
   %i_next = sub i64 %i, 1
   br label %apply_loop
