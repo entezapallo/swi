@@ -1,8 +1,10 @@
 # swi <img src=".media/logo.png" align="right" height="250" />
 
-Editor TUI vi-like, **lazy** y **scriptable** sobre el motor jotter. Binarios
-**musl dinámicos**, motor escrito en módulos **LLVM IR** y un driver Fexl
-persistente que decide el layout, los atajos y los formateadores.
+Editor TUI vi-like, **lazy** y **scriptable** sobre el motor jotter. **musl
+dinámico**, motor escrito en módulos **LLVM IR** y un driver Fexl persistente
+que decide el layout, los atajos y los formateadores. En `fast` hay dos binarios
+(`swi` y su hijo `fexlswi0`); en los perfiles de tamaño hay **un solo ELF**
+(`swi`) que incluye al intérprete Fexl, y `fexlswi0` es un symlink a ese ELF.
 
 Pensado para leer y editar archivos grandes de texto: importa no repintar todo
 el buffer y poder scriptar el análisis desde Fexl.
@@ -23,21 +25,25 @@ swi/
 ## Arrancar
 
 ```bash
-make opt          # fexlswi opt + swi opt
-make opt-full     # fexlswi opt-full + swi opt-full, de una pura volada
-make selfh        # fexlswi selfh + swi selfh
-make fast         # fexlswi fast + swi fast (iterar/debug)
+make opt          # UN binario: swi + intérprete Fexl fusionados (LTO, -Oz)
+make opt-full     # opt + segunda ronda de Oz + flags de link agresivos
+make selfh        # como opt pero sin globaldce en el fusionado
+make fast         # swi -O0 -g; fexlswi aparte (proceso hijo, como antes)
 make clean all    # limpia fexlswi y swi, sin compilar
 make install      # empaqueta build/ con un binario y una carpeta
 ./build/swi archivo.txt
 ```
 
 `make install` funciona después de `opt` u `opt-full`. `build/` queda con
-un solo binario (`swi`) y una sola carpeta (`fexlswi/`).
+un solo binario (`swi`), el symlink `fexlswi/bin/fexlswi0 -> ../../swi` y una
+sola carpeta (`fexlswi/`, con las librerías Fexl en `src/lib`).
 
-`make opt`, `opt-full`, `selfh` y `fast` compilan **todo junto**: primero
-`fexlswi` y después `swi`. No hace falta un paso previo separado. Si querés
-reconstruir solo el intérprete, `make -C fexlswi clean all` sigue funcionando.
+`make opt`, `opt-full` y `selfh` compilan **todo junto**: `fexlswi` genera
+`fexlswi_lib.bc` (sin internalizar, con `main -> fexl_main`) y `swi` lo linkea
+consigo en `fused.bc`; un `dispatch.c` generado elige `fexl_main` o `swi_main`
+según `argv[0]`. `fast` mantiene dos ELF separados. No hace falta un paso previo
+separado. Si querés reconstruir solo el intérprete,
+`make -C fexlswi clean all` sigue funcionando.
 
 ## Diseño
 

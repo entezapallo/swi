@@ -6,19 +6,22 @@ Ver `../scripting.md`.
 
 ## Binarios finales
 
-Solo dos, en cada perfil:
+Dos ELF standalone por perfil, más un bitcode para `swi`:
 
 ```
 build/opt/bin/fexlswi     build/opt/bin/fexlswi0
 build/selfh/bin/fexlswi   build/selfh/bin/fexlswi0
+build/opt/lib/fexlswi.bc  build/opt/lib/fexlswi_lib.bc
 ```
 
 - `fexlswi`: carga `main.fxl` al arrancar.
 - `fexlswi0`: el mismo ELF con otro nombre; el sufijo `0` evita cargar
-  `main.fxl`. Es el que `swi` invoca en runtime (`fork/exec`).
+  `main.fxl`. Lo usa `swi` en `fast` y en pruebas.
+- `fexlswi_lib.bc`: el intérprete sin `internalize`/`globaldce` y con
+  `main -> fexl_main`; `swi` lo linkea en los perfiles LTO para formar un
+  solo ELF donde `fexlswi0` es un symlink a `swi`.
 
-Ambos son **musl dinámicos**, como `swi`; `swi` los usa como proceso aparte,
-no como librería compartida. `bin/` queda con el último perfil compilado.
+Todo es **musl dinámico**. `bin/` queda con el último perfil compilado.
 
 ## Compilación
 
@@ -43,7 +46,8 @@ Pipeline:
 3. Los 7 módulos IR de `../regex/` se compilan a `../regex/build/*.bc` con
    `-mtriple=x86_64-linux-musl` y los tipos compartidos de `rx_types.ll`
    inyectados por concatenación (IR no tiene `include`).
-4. `llvm-link-21` fusiona todo en `lib/fexlswi.bc`.
+4. `llvm-link-21` fusiona todo en `lib/fexlswi.bc` y, sin pases FUSE y con
+   `main -> fexl_main`, en `lib/fexlswi_lib.bc` (para el ELF fusionado de `swi`).
 5. Si el perfil lo pide, `opt-21 -passes=...` optimiza el bitcode.
 6. `clang-21` linkea contra musl → `bin/fexlswi` y copia a `bin/fexlswi0`.
 
@@ -54,7 +58,7 @@ src/        código C de Fexl + type_regex.c + type_script.c
 ../regex/   11 módulos regex compartidos con swi (incluye rx_types.ll)
 ../regex/build .bc generados con -mtriple=x86_64-linux-musl
 obj/        .bc generados por módulo
-lib/        fexlswi.bc fusionado
+lib/        fexlswi.bc (standalone) y fexlswi_lib.bc (para swi) fusionados
 bin/        fexlswi / fexlswi0
 build/      copias por perfil
 test/       suite Fexl

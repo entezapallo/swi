@@ -96,7 +96,8 @@ paso previo. Ver `BUILD.md`, `scripting.md` y `extend.md`.
 - **F2/F3/F4 no hacen nada**: los capturó el escritorio. Usá `Ctrl+E/F/B`.
 - **No se ve el archivo**: el buffer se abre vacío si se creó con `Ctrl+T`;
   abrilo con `./swi archivo` o `:e <ruta>`.
-- **Sin salida Fexl**: el driver no arrancó; revisá
-  `fexlswi/bin/fexlswi0` y el log de la consola.
+- **Sin salida Fexl**: el driver no arrancó; revisá `fexlswi/bin/fexlswi0`
+  (`fast`) o `build/fexlswi/bin/fexlswi0` (perfiles LTO, symlink a `swi`) y el
+  log de la consola.
 - **Se perdió el resaltado**: escaped y volvé a buscar; los spans se
   recalculan al editar con el último patrón.

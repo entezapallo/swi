@@ -16,7 +16,7 @@ eventos estructurales (teclas de panel, resize, cambio de modo, `:w`, salida)
 también viajan al driver como `EV ...` y vuelven como un frame terminado en
 `.`.
 
-## ¿Por qué `fexlswi` es un binario aparte?
+## ¿Por qué el driver Fexl corre en otro proceso?
 
 `fexl-regex0` no puede evaluar strings dinámicos con `evaluate` (solo formas
 quoted), así que la consola no podía correr dentro del driver. La solución fue:
@@ -26,9 +26,11 @@ quoted), así que la consola no podía correr dentro del driver. La solución fu
 - `eval.ll` acumula las líneas de la consola en un script de sesión por PID y
   re-evalúa el script completo, así que las definiciones sobreviven.
 
-El binario `fexlswi0` es **musl dinámico**, como `swi`: `swi` lo usa como
-proceso aparte (`fork/exec`), no como librería compartida. El sufijo `0` evita
-que Fexl cargue `main.fxl`. Ver `scripting.md`, §1.
+El hijo es un **proceso** aparte, no una librería compartida. En `fast` es un
+ELF propio (`fexlswi/bin/fexlswi0`); en `opt`/`opt-full`/`selfh` es el **mismo
+ELF** que `swi` vía un symlink (`build/fexlswi/bin/fexlswi0 -> ../../swi`) y un
+`dispatch.c` que elige `fexl_main` o `swi_main` según `argv[0]`. Todo es musl
+dinámico. El sufijo `0` evita que Fexl cargue `main.fxl`. Ver `scripting.md`, §1.
 
 ## ¿Por qué `swi` tiene módulos regex?
 

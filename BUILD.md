@@ -7,10 +7,10 @@ están unificados en `regex/`. No hay submodules.
 ## Compilación
 
 ```bash
-make opt              # dinámico musl, -Oz + LTO + globaldce
-make opt-full         # -Oz + LTO + internalize (binario mínimo)
-make selfh            # dinámico musl, -Oz + LTO, sin pases extra
-make fast             # iteración rápida (-O0, sin LTO), también musl
+make opt              # UN binario: -Oz + LTO + globaldce, musl dinámico
+make opt-full         # opt + segunda ronda de Oz + flags de link agresivos
+make selfh            # como opt pero sin globaldce en el fusionado
+make fast             # dos ELF: swi -O0 -g + fexlswi0 (proceso hijo)
 make clean all        # limpia ambos proyectos, no compila
 make install          # solo empaqueta opt/opt-full: build/swi + build/fexlswi/
 make test             # suite completa (perfil fast)
@@ -19,10 +19,17 @@ make MODE=opt-full test
 make test-selfh
 ```
 
-Cada target compila primero `fexlswi` y después `swi`. Los binarios quedan en
-`build/<perfil>/swi`; `build/swi` es el último perfil compilado. Hay un solo
-binario por perfil (`swi`), que arranca con el driver Fexl `ui.fxl`.
-`make install` deja exactamente `build/swi` y `build/fexlswi/`.
+Cada target compila primero `fexlswi` y después `swi`. En los perfiles LTO
+(`opt`, `opt-full`, `selfh`) `fexlswi` entrega `lib/fexlswi_lib.bc` y `swi`
+lo linkea consigo: hay **un solo ELF** por perfil en `build/<perfil>/swi`, y
+`build/swi` es el último perfil compilado. Un `dispatch.c` generado por el
+Makefile decide por `basename(argv[0])` si entra a `fexl_main` o `swi_main`;
+`fexlswi0` es un symlink a `swi`, así que el driver Fexl sigue corriendo como
+proceso hijo con el mismo ELF. En `fast` hay dos binarios separados como antes.
+
+`make install` deja `build/swi`, el symlink `build/fexlswi/bin/fexlswi0` y
+`build/fexlswi/src/lib` con las librerías Fexl. `ui.fxl` queda en
+`build/fexlswi/ui.fxl`.
 
 ## Estructura (sin `vendor/`)
 
@@ -37,9 +44,12 @@ fexlswi/  intérprete Fexl + binarios fexlswi / fexlswi0
 ui.fxl    driver Fexl persistente (layout y atajos)
 ```
 
-Los 11 módulos de `regex/` son compartidos: `swi` los compila en su `fused.bc`
-y `fexlswi` los compila en `lib/fexlswi.bc`. `rx_types.ll` se concatena al
-comienzo de cada módulo en el build porque LLVM IR no tiene `include`.
+Los 11 módulos de `regex/` son compartidos: `fexlswi` compila los 7 módulos del
+motor en `lib/fexlswi.bc` y en `lib/fexlswi_lib.bc` (el que consume `swi`), y
+`swi` compila aparte solo `replace` y `format` para su `fused.bc` — el resto
+viene dentro de `fexlswi_lib.bc`, así no hay símbolos duplicados. `rx_types.ll`
+se concatena al comienzo de cada módulo en el build porque LLVM IR no tiene
+`include`.
 
 Todo se compila con target `x86_64-linux-musl` y se linkea dinámicamente con
 rpath a `/usr/lib/x86_64-linux-musl`.
@@ -47,7 +57,8 @@ rpath a `/usr/lib/x86_64-linux-musl`.
 ## Dependencias
 
 - Toolchain LLVM: `clang-21`, `opt-21`, `llc-21`, `llvm-link-21`, `lld-21`.
-- Fexl: `fexlswi/bin/fexlswi0` por defecto. Override:
+- Fexl: en `fast`, `fexlswi/bin/fexlswi0` (ELF aparte); en los perfiles LTO,
+  `build/fexlswi/bin/fexlswi0` (symlink al mismo `swi`). Override:
   ```bash
   make FEXL=/otro/fexlswi0 swi-fast
   ```

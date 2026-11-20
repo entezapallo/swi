@@ -19,20 +19,27 @@ El intérprete original `fexl-regex0` no puede evaluar strings dinámicos con
 `evaluate` (solo formas quoted). Por eso la consola no podía correr dentro del
 driver: la expresión que escribís llega como texto en runtime.
 
-La solución son **dos binarios** generados desde el mismo `lib/fexlswi.bc`:
+La solución son **dos productos** generados desde las mismas fuentes:
 
-| Binario | Diferencia | Quién lo usa |
+| Producto | Diferencia | Quién lo usa |
 |---|---|---|
-| `fexlswi` | Carga `main.fxl` al arrancar | uso general / pruebas |
-| `fexlswi0` | El sufijo `0` evita cargar `main.fxl`: entorno limpio | `swi` en runtime (`fork/exec`) |
+| `bin/fexlswi` / `bin/fexlswi0` | ELF standalone; el sufijo `0` evita cargar `main.fxl` | `fast`, pruebas y `swi fast` |
+| `lib/fexlswi_lib.bc` | el mismo intérprete sin `internalize`/`globaldce`, con `main -> fexl_main` | `swi` en los perfiles LTO, linkeado dentro del ELF |
 
-`fexlswi.bc` = intérprete Fexl + tipo `regex` + tipo `rxsession` + los 7
-módulos IR del motor. Es **musl dinámico**, igual que `swi` (no es una
-librería compartida: `swi` lo invoca como proceso). Ver `fexlswi/BUILD.md`.
+En los perfiles LTO hay **un solo ELF**: `main.c` se compila como `swi_main` y un
+`dispatch.c` generado elige `fexl_main` o `swi_main` por `basename(argv[0])`.
+`fexlswi0` es un symlink a `swi`, así que el driver sigue siendo un proceso
+hijo con el mismo binario. En `fast` sigue habiendo dos ELF separados.
 
-El path se inyecta en compilación (`EVAL_DEF` en `swi/Makefile`) con valor
-absoluto: `/home/jcaro/swi/fexlswi/bin/fexlswi0` por defecto. Se puede
-sobrescribir con `make FEXL=/otro/fexlswi0`.
+`fexlswi.bc` / `fexlswi_lib.bc` = intérprete Fexl + tipo `regex` + tipo
+`rxsession` + los 7 módulos IR del motor. Todo es **musl dinámico**, igual que
+`swi` (no se usa como librería compartida: se invoca como proceso, o se linkea
+como bitcode en el fusionado). Ver `fexlswi/BUILD.md`.
+
+El path se inyecta en compilación (`EVAL_DEF` en el Makefile raíz) con valor
+absoluto: `fexlswi/bin/fexlswi0` en `fast` y `build/fexlswi/bin/fexlswi0`
+(symlink) en los perfiles LTO. Se puede sobrescribir con
+`make FEXL=/otro/fexlswi0`.
 
 ---
 
@@ -248,9 +255,11 @@ LLVM IR no tiene `include`, por eso se concatena en vez de importar. Lo hace
 tanto `fexlswi/Makefile` como `swi/Makefile` (reglas `REGLAS_REGEX` y
 `REGEX_LL`).
 
-`swi` **no** linkea `fexlswi.bc` dentro de su binario: sería duplicar el
-intérprete, que ya corre como hijo. Solo compila los módulos IR que necesita
-para resaltar y reemplazar.
+`swi` linkea `fexlswi_lib.bc` dentro de su binario en los perfiles LTO (es el
+mismo intérprete del hijo, compilado sin internalizar y con `main -> fexl_main`);
+por eso solo compila aparte los módulos IR que necesita para resaltar y
+reemplazar (`format`, `replace`). En `fast` no hay fusión: el intérprete corre
+en un ELF separado.
 
 ---
 
