@@ -16,14 +16,6 @@ swi/
 ├── abi/          tui_abi.h y fexl_abi.h (fronteras C ↔ IR)
 ├── core/ regex/ fsio/   módulos IR del motor
 ├── fexlswi-llvm/ intérprete Fexl en IR + C residual, con Makefile propio
-│                 (value_types, memory, value, str, parse,
-│                 type_num, type_cmp, basic, type_str, type_sym, type_output,
-│                 type_record, buf, buf_str, file, file_str, convert,
-│                 type_rand, type_limit, type_math, type_hex, type_tuple,
-│                 type_var, type_istr, type_input, type_buf, type_parse,
-│                 type_argv, type_stream, type_file, die, format, report, limit,
-│                 type_fexl, type_signal, type_crypto, test, stream, base64,
-│                 type_time, show, type_bn, fexl, aot, sha256, sha512, crypto)
 ├── regex/        11 módulos IR de regex compartidos con fexlswi-llvm
 ├── ui.fxl        driver Fexl (layout, bindings, STATUS/LOG)
 ├── build*/       binarios generados
@@ -77,9 +69,6 @@ separado. Si querés reconstruir solo el intérprete,
 - **Scripting**: `ui.fxl` decide layout y atajos; la consola Fexl evalúa
   expresiones con `regex.compile` / `regex.spans` / `abregex.*`. Ver
   `scripting.md`.
-- **Bioinformática**: el editor maneja texto plano; los visores de FASTQ,
-  BCF/BAM y `rec/` quedan fuera del alcance actual (ver `spec.md`, §10).
-
 ## Qué hay dentro
 
 - **NORMAL / INSERT / VISUAL / COMMAND**, `h/j/k/l`, mots de palabra,
