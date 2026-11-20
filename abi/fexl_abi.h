@@ -56,6 +56,10 @@ extern void  *resize_memory(void *data, uint64_t o_size, uint64_t n_size);
 extern void   free_memory(void *data, uint64_t num_bytes);
 extern void   end_memory(void);
 
+/* parse.ll */
+extern value cur_label;
+extern value parse_top(void);
+
 /* str.ll */
 typedef struct string *string;
 struct string { uint64_t len; char data[]; };

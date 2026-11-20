@@ -15,7 +15,8 @@ swi/
 ├── test/         arneses por módulo
 ├── abi/          tui_abi.h y fexl_abi.h (fronteras C ↔ IR)
 ├── core/ regex/ fsio/   módulos IR del motor
-├── fexl/         núcleo Fexl en IR (value_types, memory, value, str)
+├── fexl/         núcleo Fexl en IR (value_types, memory, value, str, parse,
+│                 type_num, type_cmp)
 ├── fexlswi/      intérprete Fexl (C restante) + binarios (fexlswi / fexlswi0)
 ├── regex/        11 módulos IR de regex compartidos con fexlswi
 ├── ui.fxl        driver Fexl (layout, bindings, STATUS/LOG)
