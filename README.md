@@ -8,7 +8,7 @@ que decide el layout, los atajos y los formateadores. En `fast` hay dos binarios
 
 Pensado para leer y editar archivos grandes de texto: importa no repintar todo
 el buffer y poder scriptar el análisis desde Fexl.
-Logo robado del split lp de Druadan Forest/Old Sorcery (escuchen dungeon synth)
+Logo robado del split LP de Druadan Forest/Old Sorcery (escuchen dungeon synth)
 ```
 swi/
 ├── tui/          código C/H/IR del editor (termbox2, state, win_editor, …)
@@ -24,8 +24,8 @@ swi/
 │                 type_argv, type_stream, type_file, die, format, report, limit,
 │                 type_fexl, type_signal, type_crypto, test, stream, base64,
 │                 type_time, show, type_bn, fexl, aot, sha256, sha512, crypto)
-├── fexlswi/      intérprete Fexl (C restante) + binarios (fexlswi / fexlswi0)
-├── regex/        11 módulos IR de regex compartidos con fexlswi
+├── fexlswi/      wrapper que delega en fexlswi-llvm + runtime .fxl + binarios
+├── regex/        11 módulos IR de regex compartidos con fexlswi-llvm
 ├── ui.fxl        driver Fexl (layout, bindings, STATUS/LOG)
 ├── build*/       binarios generados
 └── docs: BUILD.md · about.md · cheatsheet.md · extend.md · scripting.md · addformat.md · spec.md
