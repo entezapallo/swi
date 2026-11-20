@@ -101,7 +101,7 @@ RX_TYPES := regex/rx_types.ll
 REGEX_LL := replace format regex_parser regex_compiler regex_thread regex_runner
 FSIO  := fsio
 # Nucleo Fexl en IR (Paso 1). value_types.ll se inyecta por concatenacion.
-FEXL_IR := value memory str parse type_num type_cmp basic type_str type_sym type_output type_record buf buf_str file file_str convert type_rand type_limit type_math type_hex type_tuple type_var type_istr type_input type_buf type_parse type_argv type_stream type_file die format report limit type_fexl type_signal type_crypto test stream base64
+FEXL_IR := value memory str parse type_num type_cmp basic type_str type_sym type_output type_record buf buf_str file file_str convert type_rand type_limit type_math type_hex type_tuple type_var type_istr type_input type_buf type_parse type_argv type_stream type_file die format report limit type_fexl type_signal type_crypto test stream base64 type_time
 FEXL_IR_DIR := fexl
 FEXL_IR_TYPES := fexl/value_types.ll
 vpath %.ll tui $(CORE) $(REGEX) $(FSIO) $(FEXL_IR_DIR)
