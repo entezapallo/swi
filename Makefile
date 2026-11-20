@@ -27,7 +27,9 @@ CLANG   := $(LLVM_PREFIX)clang-21 --target=x86_64-linux-musl
 LLC     := $(LLVM_PREFIX)llc-21
 LLLINK  := $(LLVM_PREFIX)llvm-link-21
 LLSTRIP := $(LLVM_PREFIX)llvm-strip-21
-LDFLAG_LTO := -fuse-ld=lld-21 -Wl,--icf=all
+# --icf=safe, no --icf=all: Fexl guarda punteros a funcion en value.T y los
+# compara como tag de tipo; --icf=all los pliega y el driver crashea.
+LDFLAG_LTO := -fuse-ld=lld-21 -Wl,--icf=safe
 
 # Los .ll no declaran target datalayout: sin -mtriple la ABI se rompe.
 OPT_TRIPLE := -mtriple=x86_64-linux-musl

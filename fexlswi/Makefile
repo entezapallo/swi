@@ -23,11 +23,11 @@
 #   - musl dinamico real: -L al dir de musl + dynamic-linker + rpath.
 #   - El .bc fusionado se codegenea en el LINK, y -ffunction-sections /
 #     -fdata-sections NO quedan en el IR: van en el link (CG). Sin ellos
-#     --gc-sections e --icf=all no tienen secciones sobre las que trabajar.
+#     --gc-sections e --icf=safe no tienen secciones sobre las que trabajar.
 #   - -no-pie con relocation static (-fno-pic -fno-pie en C y en el link).
 #   - C sin unwind tables ni stack protector; .ll de regex con
 #     nounwind/optsize/minsize (clang -Oz solo lo pone en C).
-#   - lld: --gc-sections, --icf=all, -O2, sin build-id, noseparate-code, -s.
+#   - lld: --gc-sections, --icf=safe, -O2, sin build-id, noseparate-code, -s.
 #   - opt-full suma: -z norelro, --hash-style=gnu, --no-rosegment y una
 #     segunda ronda de globaldce + default<Oz> sobre el fusionado.
 #
@@ -66,8 +66,10 @@ MUSL_LINK := -L/usr/lib/x86_64-linux-musl \
 CG := -ffunction-sections -fdata-sections \
       -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-pic -fno-pie
 
+# --icf=safe, no --icf=all: Fexl usa value.T como tag de tipo (puntero a
+# funcion); --icf=all pliega funciones con direccion tomada y crashea el driver.
 LINK := -Oz -no-pie $(CG) -fuse-ld=lld $(MUSL_LINK) -Wl,--gc-sections \
-        -Wl,--icf=all -Wl,-O2 -Wl,--build-id=none -Wl,-z,noseparate-code -s
+        -Wl,--icf=safe -Wl,-O2 -Wl,--build-id=none -Wl,-z,noseparate-code -s
 FULL_LINK := $(LINK) -Wl,-z,norelro -Wl,--hash-style=gnu -Wl,--no-rosegment
 
 # agrega nounwind/optsize/minsize a los define del IR (clang -Oz lo hace en C)
