@@ -100,7 +100,11 @@ RX_TYPES := regex/rx_types.ll
 # Modulos de regex/ que se linkean en swi (inyectan RX_TYPES al compilar).
 REGEX_LL := replace format regex_parser regex_compiler regex_thread regex_runner
 FSIO  := fsio
-vpath %.ll tui $(CORE) $(REGEX) $(FSIO)
+# Nucleo Fexl en IR (Paso 1). value_types.ll se inyecta por concatenacion.
+FEXL_IR := value memory str
+FEXL_IR_DIR := fexl
+FEXL_IR_TYPES := fexl/value_types.ll
+vpath %.ll tui $(CORE) $(REGEX) $(FSIO) $(FEXL_IR_DIR)
 
 .PHONY: all fast opt opt-full selfh install clean \
         swi-build swi-fast swi-opt swi-only run run-opt \
@@ -251,6 +255,11 @@ $(BUILD)/%.o: %.ll | $(BUILD)
 $(BUILD)/%.bc: %.ll | $(BUILD)
 	$(ATTR_FILTER) $< | $(OPT) $(OPT_TRIPLE) $(OPT_PASS) - -o $@
 
+# nucleo Fexl en IR: value_types.ll inyectado, mismo pipeline que regex/
+$(BUILD)/fexl_%.o: $(FEXL_IR_DIR)/%.ll $(FEXL_IR_TYPES) | $(BUILD)
+	{ cat $(FEXL_IR_TYPES); $(ATTR_FILTER) $<; } | $(OPT) $(OPT_TRIPLE) $(OPT_PASS) - -o - \
+	  | $(LLC) $(LLC_OPTS) -filetype=obj - -o $@
+
 TUI_LL := state window canvas win_editor console memory fileman fexl_ui eval shell draw
 ENGINE_LL := fsio_posix fsio_ensure_dir fsio_list_dir fsio_actions fsio_getdents \
              textbuffer lineindex document history find chunk \
@@ -336,6 +345,13 @@ $(BUILD)/test_fexl_ui.o: test/test_fexl_ui.c tui/fexl_ui.h | $(BUILD)
 $(BUILD)/test_fexl_ui: $(BUILD)/test_fexl_ui.o $(BUILD)/fexl_ui.o
 	$(CLANG) $(TEST_LDFLAGS) $^ -o $@
 
+# nucleo Fexl migrado a IR (value/memory/str) + stubs de die/fput en el arnes
+$(BUILD)/test_fexl_value.o: test/test_fexl_value.c abi/fexl_abi.h | $(BUILD)
+	$(CLANG) $(CFLAGS) -I. -c $< -o $@
+$(BUILD)/test_fexl_value: $(BUILD)/test_fexl_value.o \
+                          $(BUILD)/fexl_value.o $(BUILD)/fexl_memory.o $(BUILD)/fexl_str.o
+	$(CLANG) $(TEST_LDFLAGS) $^ -o $@
+
 $(BUILD)/test_integration.o: test/test_integration.c tui/in.h tui/eval.h \
                              tui/fexl_ui.h abi/tui_abi.h | $(BUILD)
 	$(CLANG) $(CFLAGS) $(EVAL_DEF) $(UI_SCRIPT_DEF) -I. -c $< -o $@
@@ -350,8 +366,8 @@ run-opt:
 
 test: $(BUILD)/test_state $(BUILD)/test_window $(BUILD)/test_canvas \
       $(BUILD)/test_win_editor $(BUILD)/test_console $(BUILD)/test_fileman \
-      $(BUILD)/test_memory $(BUILD)/test_fexl_ui $(BUILD)/test_integration \
-      $(BUILD)/swi
+      $(BUILD)/test_memory $(BUILD)/test_fexl_ui $(BUILD)/test_fexl_value \
+      $(BUILD)/test_integration $(BUILD)/swi
 	./$(BUILD)/test_state
 	./$(BUILD)/test_window
 	./$(BUILD)/test_canvas
@@ -360,6 +376,7 @@ test: $(BUILD)/test_state $(BUILD)/test_window $(BUILD)/test_canvas \
 	./$(BUILD)/test_fileman
 	./$(BUILD)/test_memory
 	./$(BUILD)/test_fexl_ui
+	./$(BUILD)/test_fexl_value
 	./$(BUILD)/test_integration
 
 test-opt:

@@ -36,11 +36,12 @@ proceso hijo con el mismo ELF. En `fast` hay dos binarios separados como antes.
 ```
 tui/      C/H/LL del editor + termbox2.h
 test/     arneses por módulo
-abi/      tui_abi.h
+abi/      tui_abi.h y fexl_abi.h (fronteras C ↔ IR)
 core/     módulos IR del motor (document, chunk, lineindex, …)
 regex/    11 módulos IR de regex + rx_types.ll (tipos compartidos)
 fsio/     módulos IR de fsio (incluye fsio_getdents.ll para musl)
-fexlswi/  intérprete Fexl + binarios fexlswi / fexlswi0
+fexl/     núcleo Fexl en IR: value_types.ll, memory.ll, value.ll, str.ll
+fexlswi/  intérprete Fexl (C restante) + binarios fexlswi / fexlswi0
 ui.fxl    driver Fexl persistente (layout y atajos)
 ```
 

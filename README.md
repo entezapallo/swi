@@ -13,9 +13,10 @@ Logo robado del split lp de Druadan Forest/Old Sorcery (escuchen dungeon synth)
 swi/
 ├── tui/          código C/H/IR del editor (termbox2, state, win_editor, …)
 ├── test/         arneses por módulo
-├── abi/          tui_abi.h (frontera C ↔ IR)
+├── abi/          tui_abi.h y fexl_abi.h (fronteras C ↔ IR)
 ├── core/ regex/ fsio/   módulos IR del motor
-├── fexlswi/      intérprete Fexl + binarios (fexlswi / fexlswi0)
+├── fexl/         núcleo Fexl en IR (value_types, memory, value, str)
+├── fexlswi/      intérprete Fexl (C restante) + binarios (fexlswi / fexlswi0)
 ├── regex/        11 módulos IR de regex compartidos con fexlswi
 ├── ui.fxl        driver Fexl (layout, bindings, STATUS/LOG)
 ├── build*/       binarios generados
