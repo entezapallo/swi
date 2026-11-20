@@ -1,17 +1,39 @@
 # fexlswi — Fexl + extensión regex + motor jotter.
 #
-# Build 100% Make. Los scripts shell heredados del upstream (src/build,
-# src/build_lib, src/build_regex, src/lib_build y build.sh) se eliminaron:
-# antes había dos sistemas de build (Make + shell) y la lógica de regex estaba
-# duplicada en este Makefile y en el de ~/swi. Ahora hay un solo lugar con
-# los flags y un solo set de reglas.
+# Build 100% Make (sin scripts shell). Vive anidado en ~/swi: los .ll de regex
+# estan en ../regex y el Makefile raiz (~/swi/Makefile) lo invoca por perfil.
 #
-#   make fast / opt / opt-full / selfh   perfiles (todos musl dinámico)
-#   make clean                           borra todos los generados
+#   make fast       -O0 -g, sin LTO optimizado ni strip (iterar/depurar)
+#   make opt        -Oz + LTO + internalize/globaldce, musl dinamico
+#   make opt-full   opt + segunda ronda de Oz + flags de link agresivos
+#   make selfh      -Oz + LTO sin internalize/globaldce
+#   make clean      borra todos los generados
 #
-# Unicos binarios finales: bin/fexlswi y bin/fexlswi0 (mismo ELF con distinto
-# nombre: el sufijo 0 evita cargar main.fxl). lib/fexlswi.bc es el bitcode
-# fusionado que usa swi para reproducir el build de opt.
+# Productos:
+#   bin/fexlswi, bin/fexlswi0   ELF standalone (mismo binario, el sufijo 0
+#                               evita cargar main.fxl). Util para `fast`, pruebas
+#                               y para swi en modo `fast` (proceso hijo).
+#   lib/fexlswi_lib.bc          bitcode fusionado que CONSUME swi en los perfiles
+#                               de tamano (un solo binario): SIN internalize ni
+#                               globaldce (swi lo hace al fusionar) y con
+#                               main renombrado a fexl_main (swi tiene su main).
+#   lib/fexlswi.bc              fusionado del standalone (con los pases FUSE).
+#
+# Tamano (opt / opt-full / selfh):
+#   - musl dinamico real: -L al dir de musl + dynamic-linker + rpath.
+#   - El .bc fusionado se codegenea en el LINK, y -ffunction-sections /
+#     -fdata-sections NO quedan en el IR: van en el link (CG). Sin ellos
+#     --gc-sections e --icf=all no tienen secciones sobre las que trabajar.
+#   - -no-pie con relocation static (-fno-pic -fno-pie en C y en el link).
+#   - C sin unwind tables ni stack protector; .ll de regex con
+#     nounwind/optsize/minsize (clang -Oz solo lo pone en C).
+#   - lld: --gc-sections, --icf=all, -O2, sin build-id, noseparate-code, -s.
+#   - opt-full suma: -z norelro, --hash-style=gnu, --no-rosegment y una
+#     segunda ronda de globaldce + default<Oz> sobre el fusionado.
+#
+# Cambiar de perfil sin `make clean` reutiliza obj/ del perfil anterior: el
+# Makefile raiz ya borra obj/ lib/ bin/ antes de cada perfil; si compilas
+# aca directo, corre `make clean` al cambiar de perfil.
 
 FEXL_CC ?= clang --target=x86_64-linux-musl -isystem /usr/include/x86_64-linux-musl
 OPT     ?= opt-21
@@ -20,7 +42,7 @@ LLLINK  ?= llvm-link-21
 MODULOS := regex_parser regex_compiler regex_abregex regex_thread \
            regex_runner rx_query rx_runtime
 
-# Modulos C del interprete Fexl (antes enumerados a mano en src/build).
+# Modulos C del interprete Fexl.
 FEXL_MODS := base64 basic bn buf buf_str convert crypto die file file_str \
              format limit memory nacl parse report sha256 sha512 show str \
              stream test type_argv type_bn type_buf type_cmp type_crypto \
@@ -40,19 +62,23 @@ MUSL_LINK := -L/usr/lib/x86_64-linux-musl \
              -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 \
              -Wl,-rpath,/usr/lib/x86_64-linux-musl
 
-LINK := -Oz -fuse-ld=lld $(MUSL_LINK) -Wl,--gc-sections -Wl,--icf=all \
-        -Wl,-O2 -Wl,--build-id=none -s
+# codegen del .bc fusionado (ocurre en el link; estos flags no viven en el IR)
+CG := -ffunction-sections -fdata-sections \
+      -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-pic -fno-pie
+
+LINK := -Oz -no-pie $(CG) -fuse-ld=lld $(MUSL_LINK) -Wl,--gc-sections \
+        -Wl,--icf=all -Wl,-O2 -Wl,--build-id=none -Wl,-z,noseparate-code -s
 FULL_LINK := $(LINK) -Wl,-z,norelro -Wl,--hash-style=gnu -Wl,--no-rosegment
 
 # agrega nounwind/optsize/minsize a los define del IR (clang -Oz lo hace en C)
 ATTR_FILTER = sed -E '/^define /{/\)[^)]*([ ](section|align|gc|prefix|prologue|personality|comdat)[ ]|!)[^)]*\{$$/b;s/ \{$$/ nounwind optsize minsize {/}'
 
 # type_file.c usa open()/O_* sin incluir <fcntl.h> (el upstream compilaba
-# con headers glibc donde <sys/file.h> lo traia). -include lo garantiza con
-# musl sin tocar el codigo del interprete.
+# con headers glibc). -include lo garantiza con musl sin tocar el interprete.
 FEXL_EXTRA_INC := -include fcntl.h
 
 COPT := -Oz -ffunction-sections -fdata-sections -fvisibility=hidden \
+        -fno-pic -fno-pie \
         -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-ident \
         -fno-stack-protector -Wall -Werror -Wunused-parameter \
         -Wdeclaration-after-statement -Dtimelocal=mktime -I src $(FEXL_EXTRA_INC)
@@ -77,12 +103,12 @@ fast: FUSE := verify
 fast: RXFILT := cat
 fast: RXPASS := verify
 
-opt: FUSE := default<Oz>,globaldce
+opt: FUSE := internalize<preserve-gv=main>,globaldce,default<Oz>
 opt: RXFILT := $(ATTR_FILTER)
 opt: RXPASS := verify,default<Oz>
 
 opt-full: LDFLAGS := $(FULL_LINK)
-opt-full: FUSE := internalize<preserve-gv=main>,globaldce,default<Oz>
+opt-full: FUSE := internalize<preserve-gv=main>,globaldce,default<Oz>,globaldce,default<Oz>
 opt-full: RXFILT := $(ATTR_FILTER)
 opt-full: RXPASS := verify,default<Oz>
 
@@ -90,7 +116,7 @@ selfh: FUSE := default<Oz>
 selfh: RXFILT := $(ATTR_FILTER)
 selfh: RXPASS := verify,default<Oz>
 
-fast opt opt-full selfh: $(BIN)/fexlswi $(BIN)/fexlswi0
+fast opt opt-full selfh: $(BIN)/fexlswi $(BIN)/fexlswi0 $(LIB)/fexlswi_lib.bc
 
 # --- directorios ---
 $(OBJ) $(LIB) $(BIN) $(RXBUILD):
@@ -104,12 +130,22 @@ $(OBJ)/%.bc: $(SRC)/%.c | $(OBJ)
 $(OBJ)/fexl_regex.bc: $(SRC)/fexl.c | $(OBJ)
 	$(FEXL_CC) -c -emit-llvm $(COPT) -DJOTTER_REGEX $< -o $@
 
+# misma fuente con main -> fexl_main: swi aporta su propio main (dispatch).
+$(OBJ)/fexl_regex_lib.bc: $(SRC)/fexl.c | $(OBJ)
+	$(FEXL_CC) -c -emit-llvm $(COPT) -DJOTTER_REGEX -Dmain=fexl_main $< -o $@
+
 # --- 7 modulos IR: rx_types.ll se inyecta por concatenacion ---
 $(RXBUILD)/%.bc: $(RXDIR)/%.ll $(RXDIR)/rx_types.ll | $(RXBUILD)
 	{ cat $(RXDIR)/rx_types.ll; $(RXFILT) $<; } \
 	| $(OPT) -mtriple=x86_64-linux-musl -passes='$(RXPASS)' - -o $@
 
-# --- bitcode fusionado ---
+# --- bitcode fusionado para swi (un solo binario): sin FUSE, main -> fexl_main ---
+$(LIB)/fexlswi_lib.bc: $(FEXL_CORE_BC) $(OBJ)/fexl_regex_lib.bc \
+                       $(OBJ)/type_regex.bc $(OBJ)/type_script.bc $(RX_BC) | $(LIB)
+	$(LLLINK) $(FEXL_CORE_BC) $(OBJ)/fexl_regex_lib.bc \
+		$(OBJ)/type_regex.bc $(OBJ)/type_script.bc $(RX_BC) -o $@
+
+# --- bitcode fusionado del standalone: lleva los pases FUSE ---
 $(LIB)/fexlswi.bc: $(FEXL_CORE_BC) $(OBJ)/fexl_regex.bc \
                    $(OBJ)/type_regex.bc $(OBJ)/type_script.bc $(RX_BC) | $(LIB)
 	$(LLLINK) $(FEXL_CORE_BC) $(OBJ)/fexl_regex.bc \

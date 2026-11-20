@@ -1,14 +1,24 @@
-# Makefile unificado — swi + fexlswi (repo anidado).
+# Makefile unificado — swi + fexlswi (repo anidado), UN SOLO BINARIO en los
+# perfiles de tamano.
 #
-#   make opt        fexlswi opt + swi opt
-#   make opt-full   fexlswi opt-full + swi opt-full, de una sola corrida
-#   make fast       fexlswi fast + swi fast (iterar/debug)
-#   make selfh      fexlswi selfh + swi selfh
+#   make fast       swi -O0 -g; fexlswi aparte (proceso hijo, como antes)
+#   make opt        UN binario: swi + interprete Fexl fusionados (LTO, -Oz)
+#   make opt-full   opt + segunda ronda de Oz + flags de link agresivos
+#   make selfh      como opt pero sin globaldce en el fusionado
 #   make clean all  limpia ambos proyectos y no compila nada
 #   make install    empaqueta build/ con un binario y una carpeta
 #
-# Las recetas de fexlswi viven aca (Makefile mas nuevo, 20:09); las de swi
-# se portaron del Makefile anterior sin restaurar archivos.
+# Un solo binario (perfiles LTO):
+#   - El interprete entra como bitcode (fexlswi/lib/fexlswi_lib.bc, que
+#     fexlswi/Makefile debe generar SIN internalizar y con main -> fexl_main).
+#   - tui/main.c se compila con -Dmain=swi_main y un dispatch.c generado aca
+#     decide por basename(argv[0]): "fexl*" -> fexl_main, otro -> swi_main.
+#   - fexlswi0 es un symlink a swi (build/fexlswi/bin/fexlswi0 -> ../../swi).
+#     SWI_FEXL_BIN apunta a ese symlink; el hijo hereda argv[0]=ese path.
+#   - El motor regex viene dentro de fexlswi_lib.bc: no se duplica aqui.
+#
+# Los .o por modulo (arneses de test) siguen en PIC y sin filtros: solo el
+# camino .bc/LTO recibe nounwind/optsize/minsize y -no-pie.
 
 LLVM_PREFIX ?=
 FEXL_CC ?= clang --target=x86_64-linux-musl -isystem /usr/include/x86_64-linux-musl
@@ -22,17 +32,22 @@ LDFLAG_LTO := -fuse-ld=lld-21 -Wl,--icf=all
 # Los .ll no declaran target datalayout: sin -mtriple la ABI se rompe.
 OPT_TRIPLE := -mtriple=x86_64-linux-musl
 
+MUSL_INC  := -isystem /usr/include/x86_64-linux-musl
 MUSL_LINK := -L/usr/lib/x86_64-linux-musl \
              -Wl,--dynamic-linker=/lib/ld-musl-x86_64.so.1 \
              -Wl,-rpath,/usr/lib/x86_64-linux-musl
 TEST_LDFLAGS := $(MUSL_LINK) -lm
 
-FEXL ?= fexlswi/bin/fexlswi0
 UI_SCRIPT ?= ui.fxl
-EVAL_DEF := -DSWI_FEXL_BIN="\"$(abspath $(FEXL))\""
-UI_SCRIPT_DEF := -DSWI_UI_SCRIPT="\"$(abspath $(UI_SCRIPT))\""
+UI_SCRIPT_DEF = -DSWI_UI_SCRIPT="\"$(abspath $(UI_SCRIPT))\""
 
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic
+CFLAGS += $(MUSL_INC)
+
+# agrega nounwind/optsize/minsize a los define del IR (clang -Oz lo hace en C).
+# Se salta los define con section/align/gc/prefix/prologue/personality/comdat
+# o metadata tras la lista de argumentos; verify falla fuerte si algo queda mal.
+ATTR_FILTER = sed -E '/^define /{/\)[^)]*([ ](section|align|gc|prefix|prologue|personality|comdat)[ ]|!)[^)]*\{$$/b;s/ \{$$/ nounwind optsize minsize {/}'
 
 # fexlswi tiene su propio Makefile: los perfiles y flags viven en fexlswi/Makefile.
 # Aca solo se delega; no se duplican reglas de build ni de modulos regex.
@@ -42,20 +57,28 @@ ifneq ($(filter opt selfh opt-full,$(MODE)),)
 BUILD      := build/$(MODE)
 OPT_PASS   := -passes='verify,default<Oz>'
 ifeq ($(MODE),opt-full)
-OPT_LTO    := -passes='verify,internalize<preserve-gv=main>,globaldce,default<Oz>,verify'
+OPT_LTO    := -passes='verify,internalize<preserve-gv=main>,globaldce,default<Oz>,globaldce,default<Oz>,verify'
 else ifeq ($(MODE),opt)
 OPT_LTO    := -passes='verify,internalize<preserve-gv=main>,globaldce,default<Oz>,verify'
 else
 OPT_LTO    := -passes='verify,internalize<preserve-gv=main>,default<Oz>,verify'
 endif
 LLC_OPTS   := -O2 -relocation-model=pic
-LLC_LTO    := -O2 -relocation-model=pic -function-sections -data-sections
+# fusionado: ejecutable no-PIE, sin PIC, una seccion por funcion/dato
+LLC_LTO    := -O2 -relocation-model=static -function-sections -data-sections
 CFLAGS     += -Oz -DNDEBUG -ffunction-sections -fdata-sections
+# solo el camino LTO (.bc) va sin PIC; CFLAGS (los .o de los tests, que
+# linkean PIE) NO lleva -fno-pic
 CBCFLAGS   := -Oz -DNDEBUG -ffunction-sections -fdata-sections -emit-llvm \
-              -fno-unwind-tables -fno-asynchronous-unwind-tables \
-              -fno-stack-protector -fno-ident
-LDFLAGS    := -Oz $(LDFLAG_LTO) $(MUSL_LINK) -Wl,--gc-sections -Wl,--strip-all
+              -fno-pic -fno-pie -fno-unwind-tables -fno-asynchronous-unwind-tables \
+              -fno-stack-protector -fno-ident $(MUSL_INC)
+LDFLAGS    := -Oz -no-pie $(LDFLAG_LTO) $(MUSL_LINK) -Wl,--gc-sections -Wl,--strip-all \
+              -Wl,--build-id=none -Wl,-z,noseparate-code
+ifeq ($(MODE),opt-full)
+LDFLAGS    += -Wl,-z,norelro -Wl,--hash-style=gnu -Wl,--no-rosegment
+endif
 LTO        := 1
+FEXL       ?= build/fexlswi/bin/fexlswi0
 else
 BUILD      := build
 OPT_PASS   := -passes=verify
@@ -63,7 +86,11 @@ LLC_OPTS   := -O0 -relocation-model=pic
 CFLAGS     += -O0 -g $(MUSL_LINK)
 LDFLAGS    := $(MUSL_LINK)
 LTO        :=
+FEXL       ?= fexlswi/bin/fexlswi0
 endif
+
+# ruta ABSOLUTA al interprete (en LTO: el symlink a swi)
+EVAL_DEF = -DSWI_FEXL_BIN="\"$(abspath $(FEXL))\""
 
 CORE  := core
 REGEX := regex
@@ -91,7 +118,7 @@ define BUILD_FEXL
 	$(MAKE) -C fexlswi $(P)
 	mkdir -p fexlswi/build/$(P)/bin fexlswi/build/$(P)/lib
 	cp -a fexlswi/bin/. fexlswi/build/$(P)/bin/
-	cp fexlswi/lib/fexlswi.bc fexlswi/build/$(P)/lib/
+	cp fexlswi/lib/*.bc fexlswi/build/$(P)/lib/
 	@echo "listo: fexlswi/build/$(P)/bin/fexlswi0"
 endef
 
@@ -120,26 +147,26 @@ clean:
 	rm -rf build build-opt .install-build
 	@echo "swi + fexlswi limpios"
 
-# Install: NO compila; empaqueta lo que produjo make opt.
+# Install: NO compila; empaqueta lo que produjo make opt / opt-full.
+# build/ queda con UN binario (swi), el symlink fexlswi0 y la carpeta fexlswi/
+# (Fexl busca sus librerias en ../src/lib respecto al "binario" fexlswi0).
 install:
-	@test -f build/opt/swi -o -f build/opt-full/swi || \
+	@test -f build/opt-full/swi -o -f build/opt/swi || \
 		{ echo "correr make opt u opt-full primero"; exit 1; }
-	@test -f fexlswi/bin/fexlswi0 || { echo "compilar fexlswi primero"; exit 1; }
 	rm -rf .install-tmp
 	mkdir -p .install-tmp
 	@if [ -f build/opt-full/swi ]; then cp build/opt-full/swi .install-tmp/swi; \
 	 else cp build/opt/swi .install-tmp/swi; fi
-	cp fexlswi/bin/fexlswi0 .install-tmp/fexlswi0
 	cp -a fexlswi/src/lib .install-tmp/lib
 	cp ui.fxl .install-tmp/ui.fxl
 	rm -rf build
 	mkdir -p build/fexlswi/bin build/fexlswi/src
 	cp .install-tmp/swi build/swi
-	cp .install-tmp/fexlswi0 build/fexlswi/bin/fexlswi0
+	ln -s ../../swi build/fexlswi/bin/fexlswi0
 	cp -a .install-tmp/lib build/fexlswi/src/lib
 	cp .install-tmp/ui.fxl build/fexlswi/ui.fxl
 	rm -rf .install-tmp
-	@echo "install listo: build/swi + build/fexlswi/"
+	@echo "install listo: build/swi + build/fexlswi/ (fexlswi0 -> swi)"
 
 swi-fast:
 	$(MAKE) MODE=fast swi-build
@@ -151,6 +178,11 @@ swi-only: swi-build
 
 swi-build: $(BUILD)/swi
 	@ls -lh $< | awk '{print "swi: " $$5}'
+ifeq ($(LTO),1)
+	@mkdir -p build/fexlswi/bin
+	@ln -sfn ../../swi build/fexlswi/bin/fexlswi0
+	@test -e build/fexlswi/src || ln -sfn $(abspath fexlswi/src) build/fexlswi/src
+endif
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -171,24 +203,51 @@ $(BUILD)/in.bc: tui/in.c tui/in.h | $(BUILD)
 $(BUILD)/out.bc: tui/out.c tui/out.h tui/termbox2.h | $(BUILD)
 	$(CLANG) $(CBCFLAGS) -I. -c $< -o $@
 
+# main de swi pasa a swi_main; el main real es dispatch.c (solo en LTO)
 $(BUILD)/main.bc: tui/main.c tui/in.h tui/out.h tui/eval.h tui/fexl_ui.h tui/termbox2.h abi/tui_abi.h | $(BUILD)
-	$(CLANG) $(CBCFLAGS) $(EVAL_DEF) $(UI_SCRIPT_DEF) -I. -c $< -o $@
+	$(CLANG) $(CBCFLAGS) -Dmain=swi_main $(EVAL_DEF) $(UI_SCRIPT_DEF) -I. -c $< -o $@
+
+define DISPATCH_C
+/* generado por el Makefile: un ELF, dos personalidades (swi / fexlswi) */
+extern int swi_main(int, char **);
+extern int fexl_main(int, char **);
+int main(int argc, char **argv) {
+    const char *b = "", *p;
+    if (argc > 0 && argv[0]) {
+        b = argv[0];
+        for (p = b; *p; p++)
+            if (*p == '/') b = p + 1;
+    }
+    if (b[0] == 'f' && b[1] == 'e' && b[2] == 'x' && b[3] == 'l')
+        return fexl_main(argc, argv);
+    return swi_main(argc, argv);
+}
+endef
+export DISPATCH_C
+
+$(BUILD)/dispatch.c: Makefile | $(BUILD)
+	@printf '%s\n' "$$DISPATCH_C" > $@
+
+$(BUILD)/dispatch.bc: $(BUILD)/dispatch.c
+	$(CLANG) $(CBCFLAGS) -c $< -o $@
 
 # --- IR: un modulo por objeto / bitcode ---
 # Los modulos de regex/ reciben RX_TYPES concatenado (LLVM IR no tiene include),
 # para que %RxInst/%RxProgram tengan UNA sola definicion compartida.
+# .o: arneses de test, sin filtro de atributos.
 $(foreach m,$(REGEX_LL),$(BUILD)/$(m).o): $(BUILD)/%.o: regex/%.ll $(RX_TYPES) | $(BUILD)
 	cat $(RX_TYPES) $< | $(OPT) $(OPT_TRIPLE) $(OPT_PASS) - -o - \
 	  | $(LLC) $(LLC_OPTS) -filetype=obj - -o $@
 
+# .bc: solo LTO; reciben nounwind/optsize/minsize.
 $(foreach m,$(REGEX_LL),$(BUILD)/$(m).bc): $(BUILD)/%.bc: regex/%.ll $(RX_TYPES) | $(BUILD)
-	cat $(RX_TYPES) $< | $(OPT) $(OPT_TRIPLE) $(OPT_PASS) - -o $@
+	{ cat $(RX_TYPES); $(ATTR_FILTER) $<; } | $(OPT) $(OPT_TRIPLE) $(OPT_PASS) - -o $@
 
 $(BUILD)/%.o: %.ll | $(BUILD)
 	$(OPT) $(OPT_TRIPLE) $(OPT_PASS) $< -o - | $(LLC) $(LLC_OPTS) -filetype=obj - -o $@
 
 $(BUILD)/%.bc: %.ll | $(BUILD)
-	$(OPT) $(OPT_TRIPLE) $(OPT_PASS) $< -o $@
+	$(ATTR_FILTER) $< | $(OPT) $(OPT_TRIPLE) $(OPT_PASS) - -o $@
 
 TUI_LL := state window canvas win_editor console memory fileman fexl_ui eval shell draw
 ENGINE_LL := fsio_posix fsio_ensure_dir fsio_list_dir fsio_actions fsio_getdents \
@@ -203,8 +262,14 @@ LL_BC  := $(addprefix $(BUILD)/,$(addsuffix .bc,$(ALL_LL)))
 C_BC   := $(addprefix $(BUILD)/,$(addsuffix .bc,$(ALL_C)))
 
 ifeq ($(LTO),1)
-$(BUILD)/fused.bc: $(LL_BC) $(C_BC)
-	$(LLLINK) $(LL_BC) $(C_BC) -o $@
+C_BC += $(BUILD)/dispatch.bc
+
+# el motor regex ya viene dentro de fexlswi_lib.bc: no duplicarlo
+FEXL_LIB    := fexlswi/lib/fexlswi_lib.bc
+FUSED_LL_BC := $(filter-out $(addprefix $(BUILD)/,$(addsuffix .bc,regex_parser regex_compiler regex_thread regex_runner)),$(LL_BC))
+
+$(BUILD)/fused.bc: $(FUSED_LL_BC) $(C_BC) $(FEXL_LIB)
+	$(LLLINK) $(FUSED_LL_BC) $(C_BC) $(FEXL_LIB) -o $@
 
 $(BUILD)/fused.opt.bc: $(BUILD)/fused.bc
 	$(OPT) $(OPT_TRIPLE) $(OPT_LTO) $< -o $@
