@@ -142,6 +142,14 @@ evaluate \;
 `evaluate \;` evalúa el resto del archivo con esos módulos en scope. Sin eso
 aparece `Undefined symbol say on line N`.
 
+### Formatos del usuario
+
+Además de `ui.fxl`, si existe `$XDG_CONFIG_HOME/swi/formats.fxl` (o
+`$HOME/.config/swi/formats.fxl`), `main.c` lo incluye en el script que recibe el
+driver, justo después de `evaluate \;`. Sus definiciones quedan en scope antes
+del loop, así que podés redefinir los patrones de resaltado sin tocar `ui.fxl`.
+Ver `addformat.md`.
+
 ### Hot reload
 
 `main.c` guarda `st_mtime` **y** `st_mtim.tv_nsec` de `ui.fxl`, así que detecta

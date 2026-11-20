@@ -55,6 +55,59 @@ static const char *ui_script_path(void) {
 #define MAX_LOG 24
 #define MAX_CWD 512
 #define SWI_FMT_FILE "/tmp/swi_fmt_input.txt"
+#define SWI_FORMATS_TMP_FMT "/tmp/swi_ui_%d.fxl"
+#define SWI_UI_PATH_MAX 512
+
+/* Formatos del usuario: $XDG_CONFIG_HOME/swi/formats.fxl o
+ * $HOME/.config/swi/formats.fxl. Se incluyen en el script que recibe el
+ * driver, justo despues de `evaluate \;` de ui.fxl, para que sus
+ * definiciones esten en scope antes del loop. */
+static const char *swi_formats_path(void) {
+    static char path[SWI_UI_PATH_MAX];
+    const char *xdg = getenv("XDG_CONFIG_HOME");
+    const char *home = getenv("HOME");
+    if (xdg != NULL && *xdg != '\0')
+        snprintf(path, sizeof(path), "%s/swi/formats.fxl", xdg);
+    else if (home != NULL && *home != '\0')
+        snprintf(path, sizeof(path), "%s/.config/swi/formats.fxl", home);
+    else
+        path[0] = '\0';
+    return path;
+}
+
+static const char *ui_script_effective(void) {
+    const char *base = ui_script_path();
+    static char tmp[SWI_UI_PATH_MAX];
+    struct stat sb;
+    const char *fmt = swi_formats_path();
+    FILE *in, *extra, *out;
+    char line[1024];
+    int inserted = 0;
+
+    if (fmt[0] == '\0' || stat(fmt, &sb) != 0) return base;
+
+    snprintf(tmp, sizeof(tmp), SWI_FORMATS_TMP_FMT, (int)getpid());
+    in = fopen(base, "r");
+    if (in == NULL) return base;
+    extra = fopen(fmt, "r");
+    if (extra == NULL) { fclose(in); return base; }
+    out = fopen(tmp, "w");
+    if (out == NULL) { fclose(in); fclose(extra); return base; }
+
+    while (fgets(line, sizeof(line), in) != NULL) {
+        fputs(line, out);
+        if (!inserted && strstr(line, "evaluate \\;") != NULL) {
+            char l2[1024];
+            while (fgets(l2, sizeof(l2), extra) != NULL) fputs(l2, out);
+            fputc('\n', out);
+            inserted = 1;
+        }
+    }
+    fclose(in);
+    fclose(extra);
+    fclose(out);
+    return inserted ? tmp : base;
+}
 
 extern int32_t fsio_ensure_dir(const char *path);
 extern int32_t fsio_chdir(const char *path);
@@ -165,7 +218,7 @@ int main(int argc, char **argv)
     /* driver Fexl persistente: dueño del layout y de los atajos */
     memset(&g_ui, 0, sizeof(g_ui));
     g_ui.console_h = 3;
-    if (!fexl_ui_start(SWI_FEXL_BIN, ui_script_path()))
+    if (!fexl_ui_start(SWI_FEXL_BIN, ui_script_effective()))
         fprintf(stderr, "swi: driver Fexl no disponible; layout por defecto\n");
     else
         shell_ui_sync(FUI_INIT, 3, 0, 0);
@@ -216,7 +269,7 @@ int main(int argc, char **argv)
             }
             if (changed) {
                 fexl_ui_stop();
-                if (fexl_ui_start(SWI_FEXL_BIN, ui_script_path())) {
+                if (fexl_ui_start(SWI_FEXL_BIN, ui_script_effective())) {
                     shell_ui_sync(FUI_INIT, g_ui.console_h, g_ui.tabs_col, g_ui.fileman_w);
                     shell_log_add("ui.fxl recargado");
                 }

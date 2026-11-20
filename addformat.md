@@ -14,6 +14,25 @@ aplica. Así se pueden cambiar patrones sin recompilar.
 | `regex/format.ll` | `fmt_create`, `fmt_clear`, `fmt_add_span`, `fmt_cache_*` |
 | `abi/tui_abi.h` | constantes `FMT_SEARCH`, `FMT_KEYWORD`, `FMT_STRING`, `FMT_COMMENT`, `FMT_NUMBER` |
 
+## Formatos del usuario
+
+Además de los patrones en `ui.fxl`, el editor incluye un archivo opcional:
+
+```
+$XDG_CONFIG_HOME/swi/formats.fxl      # si XDG_CONFIG_HOME está definido
+$HOME/.config/swi/formats.fxl         # si no
+```
+
+`main.c` lo detecta al arrancar y arma un script efectivo (`/tmp/swi_ui_<pid>.fxl`)
+insertando su contenido justo después de `evaluate \;` de `ui.fxl`. Eso corre
+antes del loop del driver, así que las definiciones quedan en scope y pueden
+redefinir `pat_string`, `pat_number` o `emit_fmt`. Si el archivo no existe, se
+usa `ui.fxl` directamente y no se genera ningún temporal.
+
+Como el hot reload reinicia el driver, editar `formats.fxl` también recarga los
+patrones (basta con tocar `ui.fxl` o reiniciar). El formato del archivo es Fexl
+normal, con los mismos builtins que `ui.fxl` (`regex.compile`, `regex.spans`).
+
 ## API de Fexl usada
 
 ```
@@ -118,6 +137,6 @@ byte extra del evento `FUI_FMT` y branchá en `ui.fxl` con `eq`.
   así que funciona igual con archivos cargados en chunks.
 - Si el driver no está vivo, `fmt_send()` no hace nada y el editor sigue
   funcionando sin colores de sintaxis.
-- Los patrones viven en `ui.fxl`; el protocolo y la API regex están en
+- Los patrones viven en `ui.fxl` o en `~/.config/swi/formats.fxl`; el protocolo y la API regex están en
   `scripting.md` (§4), y los estilos ya están documentados arriba en este
   mismo archivo.
