@@ -8,14 +8,14 @@ están unificados en `regex/`. No hay submodules.
 
 ```bash
 make opt              # UN binario: -Oz + LTO + globaldce, musl dinámico
-make opt-full         # opt + segunda ronda de Oz + flags de link agresivos
+make opt-full         # opt + adce + flags de link agresivos (por default)
 make selfh            # como opt pero sin globaldce en el fusionado
 make fast             # dos ELF: swi -O0 -g + fexlswi0 (proceso hijo)
 make clean all        # limpia ambos proyectos, no compila
 make install          # solo empaqueta opt/opt-full: build/swi + build/fexlswi/
 make test             # suite completa (perfil fast)
 make test-opt
-make MODE=opt-full test
+make test-opt-full
 make test-selfh
 ```
 

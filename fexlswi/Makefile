@@ -28,8 +28,9 @@
 #   - C sin unwind tables ni stack protector; .ll de regex con
 #     nounwind/optsize/minsize (clang -Oz solo lo pone en C).
 #   - lld: --gc-sections, --icf=safe, -O2, sin build-id, noseparate-code, -s.
-#   - opt-full suma: -z norelro, --hash-style=gnu, --no-rosegment y una
-#     segunda ronda de globaldce + default<Oz> sobre el fusionado.
+#   - opt-full suma: -z norelro, --hash-style=gnu, --no-rosegment (todos
+#     activos por default) y una pasada de adce + globaldce sobre el fusionado.
+#     Antes habia una segunda ronda de default<Oz>, redundante (Oz ya convergio).
 #
 # Cambiar de perfil sin `make clean` reutiliza obj/ del perfil anterior: el
 # Makefile raiz ya borra obj/ lib/ bin/ antes de cada perfil; si compilas
@@ -114,7 +115,9 @@ opt: RXFILT := $(ATTR_FILTER)
 opt: RXPASS := verify,default<Oz>
 
 opt-full: LDFLAGS := $(FULL_LINK)
-opt-full: FUSE := internalize<preserve-gv=main>,globaldce,default<Oz>,globaldce,default<Oz>
+# adce en vez de segunda ronda de default<Oz> (redundante). Segmentos agresivos
+# (-z norelro, --no-rosegment, --hash-style=gnu) siguen activos por default.
+opt-full: FUSE := internalize<preserve-gv=main>,globaldce,default<Oz>,adce,globaldce
 opt-full: RXFILT := $(ATTR_FILTER)
 opt-full: RXPASS := verify,default<Oz>
 

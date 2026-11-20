@@ -3,7 +3,7 @@
 #
 #   make fast       swi -O0 -g; fexlswi aparte (proceso hijo, como antes)
 #   make opt        UN binario: swi + interprete Fexl fusionados (LTO, -Oz)
-#   make opt-full   opt + segunda ronda de Oz + flags de link agresivos
+#   make opt-full   opt + adce + flags de link agresivos (default)
 #   make selfh      como opt pero sin globaldce en el fusionado
 #   make clean all  limpia ambos proyectos y no compila nada
 #   make install    empaqueta build/ con un binario y una carpeta
@@ -59,7 +59,9 @@ ifneq ($(filter opt selfh opt-full,$(MODE)),)
 BUILD      := build/$(MODE)
 OPT_PASS   := -passes='verify,default<Oz>'
 ifeq ($(MODE),opt-full)
-OPT_LTO    := -passes='verify,internalize<preserve-gv=main>,globaldce,default<Oz>,globaldce,default<Oz>,verify'
+# adce en vez de una segunda ronda de default<Oz> (que es redundante: Oz
+# ya convergio). Los flags de segmentos agresivos siguen activos por default.
+OPT_LTO    := -passes='verify,internalize<preserve-gv=main>,globaldce,default<Oz>,adce,globaldce,verify'
 else ifeq ($(MODE),opt)
 OPT_LTO    := -passes='verify,internalize<preserve-gv=main>,globaldce,default<Oz>,verify'
 else
@@ -108,7 +110,7 @@ vpath %.ll tui $(CORE) $(REGEX) $(FSIO) $(FEXL_IR_DIR)
 
 .PHONY: all fast opt opt-full selfh install clean \
         swi-build swi-fast swi-opt swi-only run run-opt \
-        test test-opt test-selfh size size-opt size-selfh
+        test test-opt test-opt-full test-selfh size size-opt size-selfh
 
 # `make clean all`: clean limpia ambos y all no vuelve a compilar.
 ifneq ($(filter clean,$(MAKECMDGOALS)),)
@@ -381,6 +383,9 @@ test: $(BUILD)/test_state $(BUILD)/test_window $(BUILD)/test_canvas \
 
 test-opt:
 	$(MAKE) MODE=opt test
+
+test-opt-full:
+	$(MAKE) MODE=opt-full test
 
 test-selfh:
 	$(MAKE) MODE=selfh test
