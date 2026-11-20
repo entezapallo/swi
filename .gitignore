@@ -1,5 +1,10 @@
 build/
 build-opt/
 regex/build/
+fexlswi-llvm/bin/
+fexlswi-llvm/lib/
+fexlswi-llvm/obj/
+fexlswi/bin/
+fexlswi/lib/
 *.o
 *.bc

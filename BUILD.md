@@ -54,24 +54,22 @@ abi/      tui_abi.h y fexl_abi.h (fronteras C ↔ IR)
 core/     módulos IR del motor (document, chunk, lineindex, …)
 regex/    11 módulos IR de regex + rx_types.ll (tipos compartidos)
 fsio/     módulos IR de fsio (incluye fsio_getdents.ll para musl)
-fexl/     núcleo Fexl en IR: value_types, memory, value, str, parse,
-          type_num, type_cmp, basic, type_str, type_sym, type_output,
-          type_record, buf, buf_str, file, file_str, convert, type_rand,
-          type_limit, type_math, type_hex, type_tuple, type_var, type_istr,
-          type_input, type_buf, type_parse, type_argv, type_stream, type_file,
-          die, format, report, limit, type_fexl, type_signal, type_crypto,
-          test, stream, base64, type_time, show, type_bn, fexl, aot,
-          sha256, sha512, crypto
-fexlswi/  intérprete Fexl (C restante) + binarios fexlswi / fexlswi0
+fexlswi-llvm/  intérprete Fexl en IR (~47 .ll) + C residual en src/
+               (bn, nacl, type_run, type_regex, type_script) + Makefile propio.
+               Se compila APARTE de swi; entrega lib/fexlswi_lib.bc.
+fexlswi/  wrapper que delega en fexlswi-llvm y publica bin/ y lib/,
+          más el runtime .fxl en src/lib/
 ui.fxl    driver Fexl persistente (layout y atajos)
 ```
 
 Frontera de la migración a IR: todo el **intérprete** (reducer, parser,
-builtins y driver) vive en `fexl/*.ll`. Quedan en C solo los módulos de
+builtins y driver) vive en `fexlswi-llvm/*.ll`. Quedan en C solo los módulos de
 algoritmos puros y sistemas que el intérprete llama como biblioteca de
-soporte: `bn` (enteros arbitrarios), `nacl` (criptografía) y `type_run`
-(procesos, sockets, termios). No tienen semántica de valores Fexl y su
-porte a IR escrito a mano no fue confiable (se intentó `bn` y se revirtió).
+soporte: `bn` (enteros arbitrarios), `nacl` (criptografía), `type_run`
+(procesos, sockets, termios), `type_regex` y `type_script`. No tienen semántica
+de valores Fexl y su porte a IR escrito a mano no fue confiable (se intentó
+`bn` y se revirtió). Están en `fexlswi-llvm/src/`; `fexlswi/src/` solo conserva
+el runtime `.fxl`. Ver `fexlswi-llvm/README.md`.
 
 Los 11 módulos de `regex/` son compartidos: `fexlswi` compila los 7 módulos del
 motor en `lib/fexlswi.bc` y en `lib/fexlswi_lib.bc` (el que consume `swi`), y

@@ -55,8 +55,9 @@ CFLAGS += -DTB_OPT_LIBC_WCHAR -D_GNU_SOURCE
 # o metadata tras la lista de argumentos; verify falla fuerte si algo queda mal.
 ATTR_FILTER = sed -E '/^define /{/\)[^)]*([ ](section|align|gc|prefix|prologue|personality|comdat)[ ]|!)[^)]*\{$$/b;s/ \{$$/ nounwind optsize minsize {/}'
 
-# fexlswi tiene su propio Makefile: los perfiles y flags viven en fexlswi/Makefile.
-# Aca solo se delega; no se duplican reglas de build ni de modulos regex.
+# El lenguaje se compila aparte: fexlswi-llvm/Makefile tiene los perfiles y
+# flags; fexlswi/Makefile solo delega y publica bin/ y lib/. Aca tampoco se
+# duplican reglas de build ni de modulos regex.
 
 # --- swi: perfiles (BUILD cambiado segun MODE) ---
 ifneq ($(filter opt selfh opt-full,$(MODE)),)
@@ -109,8 +110,8 @@ REGEX_LL := replace format regex_parser regex_compiler regex_thread regex_runner
 FSIO  := fsio
 # Nucleo Fexl en IR (Paso 1). value_types.ll se inyecta por concatenacion.
 FEXL_IR := value memory str parse type_num type_cmp basic type_str type_sym type_output type_record buf buf_str file file_str convert type_rand type_limit type_math type_hex type_tuple type_var type_istr type_input type_buf type_parse type_argv type_stream type_file die format report limit type_fexl type_signal type_crypto test stream base64 type_time show type_bn fexl aot sha256 sha512 crypto
-FEXL_IR_DIR := fexl
-FEXL_IR_TYPES := fexl/value_types.ll
+FEXL_IR_DIR := fexlswi-llvm
+FEXL_IR_TYPES := fexlswi-llvm/value_types.ll
 vpath %.ll tui $(CORE) $(REGEX) $(FSIO) $(FEXL_IR_DIR)
 
 .PHONY: all fast opt opt-full selfh install clean \
@@ -125,7 +126,8 @@ else
 all: opt
 endif
 
-# fexlswi se compila con su propio Makefile: aca solo se delega.
+# El lenguaje se compila en fexlswi-llvm; el wrapper fexlswi deja los productos
+# en fexlswi/bin y fexlswi/lib, que es donde este Makefile los consume.
 define BUILD_FEXL
 	rm -rf fexlswi/build/$(P) fexlswi/bin fexlswi/lib fexlswi/obj regex/build
 	$(MAKE) -C fexlswi $(P)
