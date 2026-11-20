@@ -303,7 +303,77 @@ invertir la lista. Para cambiarlo:
 
 ---
 
-## 8. Foco y paneles
+## 8. Receta: agregarle cosas al file manager
+
+La sección 7 cubre el orden. Esta cubre **cualquier otra feature**: una columna
+nueva, un filtro, un preview, una acción por tecla. El file manager es un módulo
+IR autocontenido (`tui/fileman.ll`); `main.c` solo traduce teclas y dibuja.
+
+### El estado
+
+```
+%FileMan = { ptr cwd, ptr names, i64 n, i64 sel, i64 top }
+names = char[MAX_NAMES][160] contiguo   ; MAX_NAMES = 160
+```
+
+Si tu feature necesita estado nuevo (por ejemplo `sizes[160]` o un flag de
+filtro), **extendé `%FileMan`** y actualizá juntos:
+
+1. El tipo `%FileMan` al principio de `tui/fileman.ll`.
+2. `fileman_new()` (reserva e inicializa el campo).
+3. `fileman_destroy()` (libera si es memoria).
+4. `fileman_load()` (lo recalcula al cambiar de directorio).
+5. El `declare` correspondiente en `abi/tui_abi.h` si `main.c` lo necesita.
+
+No guardes estado feature-specific en `main.c`: se pierde en el hot reload del
+driver y no sigue al objeto cuando se cambia de tab.
+
+### Dónde poner el código
+
+| Qué querés hacer | Dónde |
+|---|---|
+| Traer datos del directorio | `fileman_load()`, después de `fsio_list_dir` |
+| Calcular algo por entrada | helper IR nuevo en `tui/fileman.ll`, llamado desde `fileman_load()` |
+| Mostrar una columna nueva | `fileman_draw()` (`out_text` con x/y offsets) |
+| Una tecla nueva | `main.c`, bloque `g_focus == 2` |
+| Un atajo configurable | `BIND` en `ui.fxl` + `shell_has_bind` en `main.c` |
+
+Regla importante: **`fsio_list_dir` entrega solo nombres**. Todo lo que sea
+metadato (tamaño, fecha, permisos) hay que pedirlo aparte. Ojo: `stat(2)`
+desde IR con musl dio problemas en este build; si necesitás metadatos, agregá
+un módulo `fsio/fsio_stat.ll` con su `declare` en `abi/tui_abi.h` y probalo
+aislado antes de integrarlo. `fsio_chdir`/`fsio_list_dir` son alternativas
+probadas.
+
+### Ejemplo: columna con tamaño
+
+1. Agregá `ptr sizes` a `%FileMan` y reservalo en `fileman_new()`
+   (`malloc(160 * 8)`), liberalo en `fileman_destroy()`.
+2. En `fileman_load()`, por cada nombre, calculá el tamaño con tu helper de
+   `fsio_stat` y guardalo en `sizes[i]` (mismo índice que `names[i]`). Si el
+   helper falla, guardá `-1` y dibujá `"?"`.
+3. Si agregaste una primitiva de orden, recordá permutar también `sizes` cuando
+   se reordena `names`: pasá los dos buffers a `fileman_sort`, o recalculá
+   `sizes` después de ordenar.
+4. En `fileman_draw()`, reducí el ancho disponible de la columna de nombre y
+   emití el tamaño con `out_text(x + w - 10, y, buf, color, bg, attr)`.
+   Usá `snprintf` desde IR para formatear el número.
+5. En `main.c` no hace falta nada salvo que la feature agregue una tecla.
+
+### Para no romper nada
+
+- `..` siempre es la entrada 0: cualquier filtro u orden debe conservarla ahí
+  (`fileman_load()` la copia antes de iterar el listado).
+- `sel` y `top` son **índices**, no identificadores: si reordenás, la selección
+  puede quedar apuntando a otra entrada. Recalculalos o documentá el cambio.
+- Llamá `fileman_scroll(fm, 0)` después de cambiar la cantidad de entradas para
+  que `top` siga en rango.
+- Test: `test/test_fileman.c` cubre listado, scroll y dibujo. Agregá ahí un
+  caso con un directorio temporal conocido; no dependas del cwd del repo.
+
+---
+
+## 9. Foco y paneles
 
 `g_focus` decide quién recibe las teclas:
 
@@ -325,7 +395,7 @@ Reglas:
 
 ---
 
-## 9. Depuración
+## 10. Depuración
 
 ```bash
 # 1) verificar un módulo IR aislado antes de linkear
@@ -351,7 +421,7 @@ reload de `main.c` reinicia el driver en el próximo evento. Ver
 
 ---
 
-## 10. Modo nuevo vs. foco
+## 11. Modo nuevo vs. foco
 
 - Si el panel **reemplaza la edición** (como COMMAND), agregá un modo en
   `state.ll`: cambia el `switch i32 %mode`, el enum en C, la barra de estado y
@@ -362,7 +432,7 @@ reload de `main.c` reinicia el driver en el próximo evento. Ver
 
 ---
 
-## 11. Qué se puede hacer "en caliente"
+## 12. Qué se puede hacer "en caliente"
 
 | Cambio | ¿En caliente? |
 |---|---|
@@ -377,7 +447,7 @@ que recompilar.
 
 ---
 
-## 12. Checklist antes de commit
+## 13. Checklist antes de commit
 
 - [ ] `declare` en el módulo IR y espejo en `abi/tui_abi.h`.
 - [ ] Nombre agregado a `TUI_LL` o `ENGINE_LL` en el `Makefile`.
