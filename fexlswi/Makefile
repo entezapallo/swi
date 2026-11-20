@@ -47,12 +47,12 @@ MODULOS := regex_parser regex_compiler regex_abregex regex_thread \
 # type_record, buf, buf_str, file, file_str.
 FEXL_MODS := base64 bn crypto die \
              format limit nacl report sha256 sha512 show \
-             stream test type_argv type_bn type_crypto \
+             stream test type_bn type_crypto \
              type_fexl type_file \
-             type_run type_signal type_stream type_time
+             type_run type_signal type_time
 
 # Modulos IR del nucleo (Paso 1). value_types.ll se inyecta por concatenacion.
-FEXL_IR  := value memory str parse type_num type_cmp basic type_str type_sym type_output type_record buf buf_str file file_str convert type_rand type_limit type_math type_hex type_tuple type_var type_istr type_input type_buf type_parse
+FEXL_IR  := value memory str parse type_num type_cmp basic type_str type_sym type_output type_record buf buf_str file file_str convert type_rand type_limit type_math type_hex type_tuple type_var type_istr type_input type_buf type_parse type_argv type_stream
 IRDIR    := ../fexl
 IR_TYPES := $(IRDIR)/value_types.ll
 FEXL_IR_BC = $(addprefix $(OBJ)/fexl_,$(addsuffix .bc,$(FEXL_IR)))
