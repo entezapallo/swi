@@ -50,7 +50,7 @@ FEXL_MODS := bn crypto \
              type_run
 
 # Modulos IR del nucleo (Paso 1). value_types.ll se inyecta por concatenacion.
-FEXL_IR  := value memory str parse type_num type_cmp basic type_str type_sym type_output type_record buf buf_str file file_str convert type_rand type_limit type_math type_hex type_tuple type_var type_istr type_input type_buf type_parse type_argv type_stream type_file die format report limit type_fexl type_signal type_crypto test stream base64 type_time show type_bn
+FEXL_IR  := value memory str parse type_num type_cmp basic type_str type_sym type_output type_record buf buf_str file file_str convert type_rand type_limit type_math type_hex type_tuple type_var type_istr type_input type_buf type_parse type_argv type_stream type_file die format report limit type_fexl type_signal type_crypto test stream base64 type_time show type_bn fexl
 IRDIR    := ../fexl
 IR_TYPES := $(IRDIR)/value_types.ll
 FEXL_IR_BC = $(addprefix $(OBJ)/fexl_,$(addsuffix .bc,$(FEXL_IR)))
@@ -132,13 +132,9 @@ $(OBJ) $(LIB) $(BIN) $(RXBUILD):
 $(OBJ)/%.bc: $(SRC)/%.c | $(OBJ)
 	$(FEXL_CC) -c -emit-llvm $(COPT) $< -o $@
 
-# fexl.c se recompila con JOTTER_REGEX para exponer la extension.
-$(OBJ)/fexl_regex.bc: $(SRC)/fexl.c | $(OBJ)
-	$(FEXL_CC) -c -emit-llvm $(COPT) -DJOTTER_REGEX $< -o $@
-
-# misma fuente con main -> fexl_main: swi aporta su propio main (dispatch).
-$(OBJ)/fexl_regex_lib.bc: $(SRC)/fexl.c | $(OBJ)
-	$(FEXL_CC) -c -emit-llvm $(COPT) -DJOTTER_REGEX -Dmain=fexl_main $< -o $@
+# main del standalone (el fusionado usa dispatch.c de la raiz).
+$(OBJ)/fexl_main_standalone.bc: $(IRDIR)/standalone_main.ll | $(OBJ)
+	$(OPT) -mtriple=x86_64-linux-musl -passes='$(RXPASS)' $< -o $@
 
 # --- 7 modulos IR de regex: rx_types.ll se inyecta por concatenacion ---
 $(RXBUILD)/%.bc: $(RXDIR)/%.ll $(RXDIR)/rx_types.ll | $(RXBUILD)
@@ -150,16 +146,16 @@ $(OBJ)/fexl_%.bc: $(IRDIR)/%.ll $(IR_TYPES) | $(OBJ)
 	{ cat $(IR_TYPES); $(RXFILT) $<; } \
 	| $(OPT) -mtriple=x86_64-linux-musl -passes='$(RXPASS)' - -o $@
 
-# --- bitcode fusionado para swi (un solo binario): sin FUSE, main -> fexl_main ---
-$(LIB)/fexlswi_lib.bc: $(FEXL_CORE_BC) $(FEXL_IR_BC) $(OBJ)/fexl_regex_lib.bc \
+# --- bitcode fusionado para swi (un solo binario): fexl.ll da fexl_main ---
+$(LIB)/fexlswi_lib.bc: $(FEXL_CORE_BC) $(FEXL_IR_BC) \
                        $(OBJ)/type_regex.bc $(OBJ)/type_script.bc $(RX_BC) | $(LIB)
-	$(LLLINK) $(FEXL_CORE_BC) $(FEXL_IR_BC) $(OBJ)/fexl_regex_lib.bc \
+	$(LLLINK) $(FEXL_CORE_BC) $(FEXL_IR_BC) \
 		$(OBJ)/type_regex.bc $(OBJ)/type_script.bc $(RX_BC) -o $@
 
-# --- bitcode fusionado del standalone: lleva los pases FUSE ---
-$(LIB)/fexlswi.bc: $(FEXL_CORE_BC) $(FEXL_IR_BC) $(OBJ)/fexl_regex.bc \
+# --- bitcode fusionado del standalone: main propio + pases FUSE ---
+$(LIB)/fexlswi.bc: $(FEXL_CORE_BC) $(FEXL_IR_BC) $(OBJ)/fexl_main_standalone.bc \
                    $(OBJ)/type_regex.bc $(OBJ)/type_script.bc $(RX_BC) | $(LIB)
-	$(LLLINK) $(FEXL_CORE_BC) $(FEXL_IR_BC) $(OBJ)/fexl_regex.bc \
+	$(LLLINK) $(FEXL_CORE_BC) $(FEXL_IR_BC) $(OBJ)/fexl_main_standalone.bc \
 		$(OBJ)/type_regex.bc $(OBJ)/type_script.bc $(RX_BC) -o $@
 	@if [ "$(FUSE)" != "verify" ]; then \
 		$(OPT) -mtriple=x86_64-linux-musl -passes='$(FUSE)' $@ -o $@.tmp && \

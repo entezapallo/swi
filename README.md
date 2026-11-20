@@ -22,7 +22,7 @@ swi/
 │                 type_var, type_istr, type_input, type_buf, type_parse,
 │                 type_argv, type_stream, type_file, die, format, report, limit,
 │                 type_fexl, type_signal, type_crypto, test, stream, base64,
-│                 type_time, show, type_bn)
+│                 type_time, show, type_bn, fexl)
 ├── fexlswi/      intérprete Fexl (C restante) + binarios (fexlswi / fexlswi0)
 ├── regex/        11 módulos IR de regex compartidos con fexlswi
 ├── ui.fxl        driver Fexl (layout, bindings, STATUS/LOG)
