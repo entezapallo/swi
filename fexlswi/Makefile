@@ -45,16 +45,16 @@ MODULOS := regex_parser regex_compiler regex_abregex regex_thread \
 # Modulos C del interprete Fexl. Ya migrados a ../fexl/*.ll: memory, str,
 # value, parse, type_num, type_cmp, basic, type_str, type_sym, type_output,
 # type_record, buf, buf_str, file, file_str.
-FEXL_MODS := base64 bn convert crypto die \
+FEXL_MODS := base64 bn crypto die \
              format limit nacl report sha256 sha512 show \
              stream test type_argv type_bn type_buf type_crypto \
-             type_fexl type_file type_hex type_input type_istr type_limit \
-             type_math type_parse type_rand \
+             type_fexl type_file type_hex type_input type_istr \
+             type_parse \
              type_run type_signal type_stream type_time \
              type_tuple type_var
 
 # Modulos IR del nucleo (Paso 1). value_types.ll se inyecta por concatenacion.
-FEXL_IR  := value memory str parse type_num type_cmp basic type_str type_sym type_output type_record buf buf_str file file_str
+FEXL_IR  := value memory str parse type_num type_cmp basic type_str type_sym type_output type_record buf buf_str file file_str convert type_rand type_limit type_math
 IRDIR    := ../fexl
 IR_TYPES := $(IRDIR)/value_types.ll
 FEXL_IR_BC = $(addprefix $(OBJ)/fexl_,$(addsuffix .bc,$(FEXL_IR)))
