@@ -31,6 +31,20 @@ proceso hijo con el mismo ELF. En `fast` hay dos binarios separados como antes.
 `build/fexlswi/src/lib` con las librerías Fexl. `ui.fxl` queda en
 `build/fexlswi/ui.fxl`.
 
+## Tamaño del binario
+
+`opt-full` ronda los **117 KB**. Las dos tablas estáticas grandes de
+`tui/termbox2.h` ya no se embeben:
+
+- `wcwidth_table` (25 KB): se usa `wcwidth()`/`iswprint()` de musl con
+  `-DTB_OPT_LIBC_WCHAR -D_GNU_SOURCE` (ver `CFLAGS`/`CBCFLAGS` del Makefile).
+  `tb_init_rwfd()` hace `setlocale(LC_CTYPE, "C.UTF-8")` para fijar el locale.
+- `builtin_mod_caps` (5 KB): las 320 secuencias de teclas con modificador se
+  generan en `tb_add_builtin_mod_caps()` con el mismo orden de inserción, de
+  modo que las colisiones del trie se resuelven igual que antes.
+
+El generador agrega ~2.5 KB de `.text` pero quita ~32 KB de `.rodata`.
+
 ## Estructura (sin `vendor/`)
 
 ```

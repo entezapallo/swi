@@ -124,6 +124,7 @@ extern "C" {
 
 /* Include wchar if opting libc */
 #ifdef TB_OPT_LIBC_WCHAR
+#include <locale.h>
 #include <wchar.h>
 #include <wctype.h>
 #endif
@@ -1171,388 +1172,205 @@ static struct {
 
 /* END codegen c */
 
-static struct {
-    const char *cap;
-    const uint16_t key;
-    const uint8_t mod;
-} builtin_mod_caps[] = {
-    // xterm arrows
-    {"\x1b[1;2A",    TB_KEY_ARROW_UP,    TB_MOD_SHIFT                           },
-    {"\x1b[1;3A",    TB_KEY_ARROW_UP,    TB_MOD_ALT                             },
-    {"\x1b[1;4A",    TB_KEY_ARROW_UP,    TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[1;5A",    TB_KEY_ARROW_UP,    TB_MOD_CTRL                            },
-    {"\x1b[1;6A",    TB_KEY_ARROW_UP,    TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[1;7A",    TB_KEY_ARROW_UP,    TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[1;8A",    TB_KEY_ARROW_UP,    TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+/* Generador de las secuencias con modificadores.
+ *
+ * Antes habia aqui una tabla estatica `builtin_mod_caps[]` de 320 entradas
+ * (~5 KB de .rodata). Las secuencias se generan en runtime con el MISMO orden
+ * de insercion, porque cap_trie_add() reporta colisiones y la primera entrada
+ * gana (hay 6 colisiones legitimas, p.ej. ESC ESC [ 23 ~ para F1 y F11). */
+static int cap_trie_add(const char *cap, uint16_t key, uint8_t mod);
 
-    {"\x1b[1;2B",    TB_KEY_ARROW_DOWN,  TB_MOD_SHIFT                           },
-    {"\x1b[1;3B",    TB_KEY_ARROW_DOWN,  TB_MOD_ALT                             },
-    {"\x1b[1;4B",    TB_KEY_ARROW_DOWN,  TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[1;5B",    TB_KEY_ARROW_DOWN,  TB_MOD_CTRL                            },
-    {"\x1b[1;6B",    TB_KEY_ARROW_DOWN,  TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[1;7B",    TB_KEY_ARROW_DOWN,  TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[1;8B",    TB_KEY_ARROW_DOWN,  TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+static uint8_t tb_mod_from_digit(char d) {
+    switch (d) {
+    case '2': return TB_MOD_SHIFT;
+    case '3': return TB_MOD_ALT;
+    case '4': return TB_MOD_ALT | TB_MOD_SHIFT;
+    case '5': return TB_MOD_CTRL;
+    case '6': return TB_MOD_CTRL | TB_MOD_SHIFT;
+    case '7': return TB_MOD_CTRL | TB_MOD_ALT;
+    default:  return TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT; /* '8' */
+    }
+}
 
-    {"\x1b[1;2C",    TB_KEY_ARROW_RIGHT, TB_MOD_SHIFT                           },
-    {"\x1b[1;3C",    TB_KEY_ARROW_RIGHT, TB_MOD_ALT                             },
-    {"\x1b[1;4C",    TB_KEY_ARROW_RIGHT, TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[1;5C",    TB_KEY_ARROW_RIGHT, TB_MOD_CTRL                            },
-    {"\x1b[1;6C",    TB_KEY_ARROW_RIGHT, TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[1;7C",    TB_KEY_ARROW_RIGHT, TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[1;8C",    TB_KEY_ARROW_RIGHT, TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+static int tb_add_builtin_mod_caps(void) {
+    char cap[16];
+    int rv, d;
+    size_t i;
 
-    {"\x1b[1;2D",    TB_KEY_ARROW_LEFT,  TB_MOD_SHIFT                           },
-    {"\x1b[1;3D",    TB_KEY_ARROW_LEFT,  TB_MOD_ALT                             },
-    {"\x1b[1;4D",    TB_KEY_ARROW_LEFT,  TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[1;5D",    TB_KEY_ARROW_LEFT,  TB_MOD_CTRL                            },
-    {"\x1b[1;6D",    TB_KEY_ARROW_LEFT,  TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[1;7D",    TB_KEY_ARROW_LEFT,  TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[1;8D",    TB_KEY_ARROW_LEFT,  TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+#define TB_ADD_CAP(s, k, m)                                               \
+    do {                                                                  \
+        rv = cap_trie_add((s), (k), (m));                                 \
+        if (rv != TB_OK && rv != TB_ERR_CAP_COLLISION) return rv;         \
+    } while (0)
 
-    // xterm keys
-    {"\x1b[1;2H",    TB_KEY_HOME,        TB_MOD_SHIFT                           },
-    {"\x1b[1;3H",    TB_KEY_HOME,        TB_MOD_ALT                             },
-    {"\x1b[1;4H",    TB_KEY_HOME,        TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[1;5H",    TB_KEY_HOME,        TB_MOD_CTRL                            },
-    {"\x1b[1;6H",    TB_KEY_HOME,        TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[1;7H",    TB_KEY_HOME,        TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[1;8H",    TB_KEY_HOME,        TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+    /* xterm: ESC [ num ; mod final */
+    static const struct {
+        uint8_t num;
+        char final;
+        uint16_t key;
+    } xt[] = {
+        {1, 'A', TB_KEY_ARROW_UP},    {1, 'B', TB_KEY_ARROW_DOWN},
+        {1, 'C', TB_KEY_ARROW_RIGHT}, {1, 'D', TB_KEY_ARROW_LEFT},
+        {1, 'H', TB_KEY_HOME},        {1, 'F', TB_KEY_END},
+        {1, 'P', TB_KEY_F1},          {1, 'Q', TB_KEY_F2},
+        {1, 'R', TB_KEY_F3},          {1, 'S', TB_KEY_F4},
+        {2, '~', TB_KEY_INSERT},      {3, '~', TB_KEY_DELETE},
+        {5, '~', TB_KEY_PGUP},        {6, '~', TB_KEY_PGDN},
+        {15, '~', TB_KEY_F5},         {17, '~', TB_KEY_F6},
+        {18, '~', TB_KEY_F7},         {19, '~', TB_KEY_F8},
+        {20, '~', TB_KEY_F9},         {21, '~', TB_KEY_F10},
+        {23, '~', TB_KEY_F11},        {24, '~', TB_KEY_F12},
+    };
+    for (i = 0; i < sizeof(xt) / sizeof(xt[0]); i++) {
+        for (d = '2'; d <= '8'; d++) {
+            snprintf(cap, sizeof(cap), "\x1b[%u;%c%c",
+                (unsigned)xt[i].num, (char)d, xt[i].final);
+            TB_ADD_CAP(cap, xt[i].key, tb_mod_from_digit((char)d));
+        }
+    }
 
-    {"\x1b[1;2F",    TB_KEY_END,         TB_MOD_SHIFT                           },
-    {"\x1b[1;3F",    TB_KEY_END,         TB_MOD_ALT                             },
-    {"\x1b[1;4F",    TB_KEY_END,         TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[1;5F",    TB_KEY_END,         TB_MOD_CTRL                            },
-    {"\x1b[1;6F",    TB_KEY_END,         TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[1;7F",    TB_KEY_END,         TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[1;8F",    TB_KEY_END,         TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+    /* flechas rxvt */
+    static const struct { char lo, hi; uint16_t key; } ra[] = {
+        {'a', 'A', TB_KEY_ARROW_UP},    {'b', 'B', TB_KEY_ARROW_DOWN},
+        {'c', 'C', TB_KEY_ARROW_RIGHT}, {'d', 'D', TB_KEY_ARROW_LEFT},
+    };
+    for (i = 0; i < sizeof(ra) / sizeof(ra[0]); i++) {
+        snprintf(cap, sizeof(cap), "\x1b[%c", ra[i].lo);
+        TB_ADD_CAP(cap, ra[i].key, TB_MOD_SHIFT);
+        snprintf(cap, sizeof(cap), "\x1b\x1b[%c", ra[i].hi);
+        TB_ADD_CAP(cap, ra[i].key, TB_MOD_ALT);
+        snprintf(cap, sizeof(cap), "\x1b\x1b[%c", ra[i].lo);
+        TB_ADD_CAP(cap, ra[i].key, TB_MOD_ALT | TB_MOD_SHIFT);
+        snprintf(cap, sizeof(cap), "\x1bO%c", ra[i].lo);
+        TB_ADD_CAP(cap, ra[i].key, TB_MOD_CTRL);
+        snprintf(cap, sizeof(cap), "\x1b\x1bO%c", ra[i].lo);
+        TB_ADD_CAP(cap, ra[i].key, TB_MOD_CTRL | TB_MOD_ALT);
+    }
 
-    {"\x1b[2;2~",    TB_KEY_INSERT,      TB_MOD_SHIFT                           },
-    {"\x1b[2;3~",    TB_KEY_INSERT,      TB_MOD_ALT                             },
-    {"\x1b[2;4~",    TB_KEY_INSERT,      TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[2;5~",    TB_KEY_INSERT,      TB_MOD_CTRL                            },
-    {"\x1b[2;6~",    TB_KEY_INSERT,      TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[2;7~",    TB_KEY_INSERT,      TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[2;8~",    TB_KEY_INSERT,      TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+    /* teclas de control rxvt (sufijos ~ $ ^ @). HOME usa otro orden. */
+    static const struct { uint8_t num, home; uint16_t key; } rc[] = {
+        {7, 1, TB_KEY_HOME},   {8, 0, TB_KEY_END},
+        {2, 0, TB_KEY_INSERT}, {3, 0, TB_KEY_DELETE},
+        {5, 0, TB_KEY_PGUP},   {6, 0, TB_KEY_PGDN},
+    };
+    for (i = 0; i < sizeof(rc) / sizeof(rc[0]); i++) {
+        unsigned n = (unsigned)rc[i].num;
+        if (rc[i].home) {
+            snprintf(cap, sizeof(cap), "\x1b[%u$", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_SHIFT);
+            snprintf(cap, sizeof(cap), "\x1b\x1b[%u~", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_ALT);
+            snprintf(cap, sizeof(cap), "\x1b\x1b[%u$", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_ALT | TB_MOD_SHIFT);
+            snprintf(cap, sizeof(cap), "\x1b[%u^", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_CTRL);
+            snprintf(cap, sizeof(cap), "\x1b[%u@", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_CTRL | TB_MOD_SHIFT);
+            snprintf(cap, sizeof(cap), "\x1b\x1b[%u^", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_CTRL | TB_MOD_ALT);
+            snprintf(cap, sizeof(cap), "\x1b\x1b[%u@", n);
+            TB_ADD_CAP(cap, rc[i].key,
+                TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT);
+        } else {
+            snprintf(cap, sizeof(cap), "\x1b\x1b[%u~", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_ALT);
+            snprintf(cap, sizeof(cap), "\x1b\x1b[%u$", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_ALT | TB_MOD_SHIFT);
+            snprintf(cap, sizeof(cap), "\x1b[%u^", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_CTRL);
+            snprintf(cap, sizeof(cap), "\x1b\x1b[%u^", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_CTRL | TB_MOD_ALT);
+            snprintf(cap, sizeof(cap), "\x1b\x1b[%u@", n);
+            TB_ADD_CAP(cap, rc[i].key,
+                TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT);
+            snprintf(cap, sizeof(cap), "\x1b[%u@", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_CTRL | TB_MOD_SHIFT);
+            snprintf(cap, sizeof(cap), "\x1b[%u$", n);
+            TB_ADD_CAP(cap, rc[i].key, TB_MOD_SHIFT);
+        }
+    }
 
-    {"\x1b[3;2~",    TB_KEY_DELETE,      TB_MOD_SHIFT                           },
-    {"\x1b[3;3~",    TB_KEY_DELETE,      TB_MOD_ALT                             },
-    {"\x1b[3;4~",    TB_KEY_DELETE,      TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[3;5~",    TB_KEY_DELETE,      TB_MOD_CTRL                            },
-    {"\x1b[3;6~",    TB_KEY_DELETE,      TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[3;7~",    TB_KEY_DELETE,      TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[3;8~",    TB_KEY_DELETE,      TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+    /* F1..F10 rxvt: numeros base y alternativo */
+    static const struct { uint8_t num, alt; uint16_t key; } rf[] = {
+        {11, 23, TB_KEY_F1}, {12, 24, TB_KEY_F2},
+        {13, 25, TB_KEY_F3}, {14, 26, TB_KEY_F4},
+        {15, 28, TB_KEY_F5}, {17, 29, TB_KEY_F6},
+        {18, 31, TB_KEY_F7}, {19, 32, TB_KEY_F8},
+        {20, 33, TB_KEY_F9}, {21, 34, TB_KEY_F10},
+    };
+    for (i = 0; i < sizeof(rf) / sizeof(rf[0]); i++) {
+        unsigned n = (unsigned)rf[i].num, a = (unsigned)rf[i].alt;
+        snprintf(cap, sizeof(cap), "\x1b\x1b[%u~", n);
+        TB_ADD_CAP(cap, rf[i].key, TB_MOD_ALT);
+        snprintf(cap, sizeof(cap), "\x1b\x1b[%u~", a);
+        TB_ADD_CAP(cap, rf[i].key, TB_MOD_ALT | TB_MOD_SHIFT);
+        snprintf(cap, sizeof(cap), "\x1b[%u^", n);
+        TB_ADD_CAP(cap, rf[i].key, TB_MOD_CTRL);
+        snprintf(cap, sizeof(cap), "\x1b\x1b[%u^", n);
+        TB_ADD_CAP(cap, rf[i].key, TB_MOD_CTRL | TB_MOD_ALT);
+        snprintf(cap, sizeof(cap), "\x1b\x1b[%u^", a);
+        TB_ADD_CAP(cap, rf[i].key,
+            TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT);
+        snprintf(cap, sizeof(cap), "\x1b[%u^", a);
+        TB_ADD_CAP(cap, rf[i].key, TB_MOD_CTRL | TB_MOD_SHIFT);
+        snprintf(cap, sizeof(cap), "\x1b[%u~", a);
+        TB_ADD_CAP(cap, rf[i].key, TB_MOD_SHIFT);
+    }
 
-    {"\x1b[5;2~",    TB_KEY_PGUP,        TB_MOD_SHIFT                           },
-    {"\x1b[5;3~",    TB_KEY_PGUP,        TB_MOD_ALT                             },
-    {"\x1b[5;4~",    TB_KEY_PGUP,        TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[5;5~",    TB_KEY_PGUP,        TB_MOD_CTRL                            },
-    {"\x1b[5;6~",    TB_KEY_PGUP,        TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[5;7~",    TB_KEY_PGUP,        TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[5;8~",    TB_KEY_PGUP,        TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+    /* F11/F12 rxvt: mismo patron de sufijos que las teclas de control, pero
+     * se insertan DESPUES de F1..F10 para preservar el orden original: sus
+     * numeros (23, 24) colisionan con los alternativos de F1 y F2. */
+    static const struct { uint8_t num; uint16_t key; } rc_last[] = {
+        {23, TB_KEY_F11}, {24, TB_KEY_F12},
+    };
+    for (i = 0; i < sizeof(rc_last) / sizeof(rc_last[0]); i++) {
+        unsigned n = (unsigned)rc_last[i].num;
+        snprintf(cap, sizeof(cap), "\x1b\x1b[%u~", n);
+        TB_ADD_CAP(cap, rc_last[i].key, TB_MOD_ALT);
+        snprintf(cap, sizeof(cap), "\x1b\x1b[%u$", n);
+        TB_ADD_CAP(cap, rc_last[i].key, TB_MOD_ALT | TB_MOD_SHIFT);
+        snprintf(cap, sizeof(cap), "\x1b[%u^", n);
+        TB_ADD_CAP(cap, rc_last[i].key, TB_MOD_CTRL);
+        snprintf(cap, sizeof(cap), "\x1b\x1b[%u^", n);
+        TB_ADD_CAP(cap, rc_last[i].key, TB_MOD_CTRL | TB_MOD_ALT);
+        snprintf(cap, sizeof(cap), "\x1b\x1b[%u@", n);
+        TB_ADD_CAP(cap, rc_last[i].key,
+            TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT);
+        snprintf(cap, sizeof(cap), "\x1b[%u@", n);
+        TB_ADD_CAP(cap, rc_last[i].key, TB_MOD_CTRL | TB_MOD_SHIFT);
+        snprintf(cap, sizeof(cap), "\x1b[%u$", n);
+        TB_ADD_CAP(cap, rc_last[i].key, TB_MOD_SHIFT);
+    }
 
-    {"\x1b[6;2~",    TB_KEY_PGDN,        TB_MOD_SHIFT                           },
-    {"\x1b[6;3~",    TB_KEY_PGDN,        TB_MOD_ALT                             },
-    {"\x1b[6;4~",    TB_KEY_PGDN,        TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[6;5~",    TB_KEY_PGDN,        TB_MOD_CTRL                            },
-    {"\x1b[6;6~",    TB_KEY_PGDN,        TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[6;7~",    TB_KEY_PGDN,        TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[6;8~",    TB_KEY_PGDN,        TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+    /* linux console / putty: flechas simples */
+    for (i = 0; i < sizeof(ra) / sizeof(ra[0]); i++) {
+        snprintf(cap, sizeof(cap), "\x1b[%c", ra[i].hi);
+        TB_ADD_CAP(cap, ra[i].key, TB_MOD_SHIFT);
+    }
 
-    {"\x1b[1;2P",    TB_KEY_F1,          TB_MOD_SHIFT                           },
-    {"\x1b[1;3P",    TB_KEY_F1,          TB_MOD_ALT                             },
-    {"\x1b[1;4P",    TB_KEY_F1,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[1;5P",    TB_KEY_F1,          TB_MOD_CTRL                            },
-    {"\x1b[1;6P",    TB_KEY_F1,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[1;7P",    TB_KEY_F1,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[1;8P",    TB_KEY_F1,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+    /* Home/End/PageUp/PageDown "plain" */
+    static const struct { const char *suffix; uint16_t key; } pl[] = {
+        {"H", TB_KEY_HOME},  {"F", TB_KEY_END},
+        {"1~", TB_KEY_HOME}, {"4~", TB_KEY_END},
+        {"7~", TB_KEY_HOME}, {"8~", TB_KEY_END},
+        {"5~", TB_KEY_PGUP}, {"6~", TB_KEY_PGDN},
+    };
+    for (i = 0; i < sizeof(pl) / sizeof(pl[0]); i++) {
+        snprintf(cap, sizeof(cap), "\x1b[%s", pl[i].suffix);
+        TB_ADD_CAP(cap, pl[i].key, TB_MOD_SHIFT);
+    }
 
-    {"\x1b[1;2Q",    TB_KEY_F2,          TB_MOD_SHIFT                           },
-    {"\x1b[1;3Q",    TB_KEY_F2,          TB_MOD_ALT                             },
-    {"\x1b[1;4Q",    TB_KEY_F2,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[1;5Q",    TB_KEY_F2,          TB_MOD_CTRL                            },
-    {"\x1b[1;6Q",    TB_KEY_F2,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[1;7Q",    TB_KEY_F2,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[1;8Q",    TB_KEY_F2,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
+    /* mas flechas putty: ESC O y ESC ESC O */
+    for (i = 0; i < sizeof(ra) / sizeof(ra[0]); i++) {
+        snprintf(cap, sizeof(cap), "\x1bO%c", ra[i].hi);
+        TB_ADD_CAP(cap, ra[i].key, TB_MOD_CTRL);
+        snprintf(cap, sizeof(cap), "\x1b\x1bO%c", ra[i].hi);
+        TB_ADD_CAP(cap, ra[i].key, TB_MOD_CTRL | TB_MOD_ALT);
+    }
 
-    {"\x1b[1;2R",    TB_KEY_F3,          TB_MOD_SHIFT                           },
-    {"\x1b[1;3R",    TB_KEY_F3,          TB_MOD_ALT                             },
-    {"\x1b[1;4R",    TB_KEY_F3,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[1;5R",    TB_KEY_F3,          TB_MOD_CTRL                            },
-    {"\x1b[1;6R",    TB_KEY_F3,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[1;7R",    TB_KEY_F3,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[1;8R",    TB_KEY_F3,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    {"\x1b[1;2S",    TB_KEY_F4,          TB_MOD_SHIFT                           },
-    {"\x1b[1;3S",    TB_KEY_F4,          TB_MOD_ALT                             },
-    {"\x1b[1;4S",    TB_KEY_F4,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[1;5S",    TB_KEY_F4,          TB_MOD_CTRL                            },
-    {"\x1b[1;6S",    TB_KEY_F4,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[1;7S",    TB_KEY_F4,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[1;8S",    TB_KEY_F4,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    {"\x1b[15;2~",   TB_KEY_F5,          TB_MOD_SHIFT                           },
-    {"\x1b[15;3~",   TB_KEY_F5,          TB_MOD_ALT                             },
-    {"\x1b[15;4~",   TB_KEY_F5,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[15;5~",   TB_KEY_F5,          TB_MOD_CTRL                            },
-    {"\x1b[15;6~",   TB_KEY_F5,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[15;7~",   TB_KEY_F5,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[15;8~",   TB_KEY_F5,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    {"\x1b[17;2~",   TB_KEY_F6,          TB_MOD_SHIFT                           },
-    {"\x1b[17;3~",   TB_KEY_F6,          TB_MOD_ALT                             },
-    {"\x1b[17;4~",   TB_KEY_F6,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[17;5~",   TB_KEY_F6,          TB_MOD_CTRL                            },
-    {"\x1b[17;6~",   TB_KEY_F6,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[17;7~",   TB_KEY_F6,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[17;8~",   TB_KEY_F6,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    {"\x1b[18;2~",   TB_KEY_F7,          TB_MOD_SHIFT                           },
-    {"\x1b[18;3~",   TB_KEY_F7,          TB_MOD_ALT                             },
-    {"\x1b[18;4~",   TB_KEY_F7,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[18;5~",   TB_KEY_F7,          TB_MOD_CTRL                            },
-    {"\x1b[18;6~",   TB_KEY_F7,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[18;7~",   TB_KEY_F7,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[18;8~",   TB_KEY_F7,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    {"\x1b[19;2~",   TB_KEY_F8,          TB_MOD_SHIFT                           },
-    {"\x1b[19;3~",   TB_KEY_F8,          TB_MOD_ALT                             },
-    {"\x1b[19;4~",   TB_KEY_F8,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[19;5~",   TB_KEY_F8,          TB_MOD_CTRL                            },
-    {"\x1b[19;6~",   TB_KEY_F8,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[19;7~",   TB_KEY_F8,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[19;8~",   TB_KEY_F8,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    {"\x1b[20;2~",   TB_KEY_F9,          TB_MOD_SHIFT                           },
-    {"\x1b[20;3~",   TB_KEY_F9,          TB_MOD_ALT                             },
-    {"\x1b[20;4~",   TB_KEY_F9,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[20;5~",   TB_KEY_F9,          TB_MOD_CTRL                            },
-    {"\x1b[20;6~",   TB_KEY_F9,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[20;7~",   TB_KEY_F9,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[20;8~",   TB_KEY_F9,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    {"\x1b[21;2~",   TB_KEY_F10,         TB_MOD_SHIFT                           },
-    {"\x1b[21;3~",   TB_KEY_F10,         TB_MOD_ALT                             },
-    {"\x1b[21;4~",   TB_KEY_F10,         TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[21;5~",   TB_KEY_F10,         TB_MOD_CTRL                            },
-    {"\x1b[21;6~",   TB_KEY_F10,         TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[21;7~",   TB_KEY_F10,         TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[21;8~",   TB_KEY_F10,         TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    {"\x1b[23;2~",   TB_KEY_F11,         TB_MOD_SHIFT                           },
-    {"\x1b[23;3~",   TB_KEY_F11,         TB_MOD_ALT                             },
-    {"\x1b[23;4~",   TB_KEY_F11,         TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[23;5~",   TB_KEY_F11,         TB_MOD_CTRL                            },
-    {"\x1b[23;6~",   TB_KEY_F11,         TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[23;7~",   TB_KEY_F11,         TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[23;8~",   TB_KEY_F11,         TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    {"\x1b[24;2~",   TB_KEY_F12,         TB_MOD_SHIFT                           },
-    {"\x1b[24;3~",   TB_KEY_F12,         TB_MOD_ALT                             },
-    {"\x1b[24;4~",   TB_KEY_F12,         TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[24;5~",   TB_KEY_F12,         TB_MOD_CTRL                            },
-    {"\x1b[24;6~",   TB_KEY_F12,         TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[24;7~",   TB_KEY_F12,         TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b[24;8~",   TB_KEY_F12,         TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    // rxvt arrows
-    {"\x1b[a",       TB_KEY_ARROW_UP,    TB_MOD_SHIFT                           },
-    {"\x1b\x1b[A",   TB_KEY_ARROW_UP,    TB_MOD_ALT                             },
-    {"\x1b\x1b[a",   TB_KEY_ARROW_UP,    TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1bOa",       TB_KEY_ARROW_UP,    TB_MOD_CTRL                            },
-    {"\x1b\x1bOa",   TB_KEY_ARROW_UP,    TB_MOD_CTRL | TB_MOD_ALT               },
-
-    {"\x1b[b",       TB_KEY_ARROW_DOWN,  TB_MOD_SHIFT                           },
-    {"\x1b\x1b[B",   TB_KEY_ARROW_DOWN,  TB_MOD_ALT                             },
-    {"\x1b\x1b[b",   TB_KEY_ARROW_DOWN,  TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1bOb",       TB_KEY_ARROW_DOWN,  TB_MOD_CTRL                            },
-    {"\x1b\x1bOb",   TB_KEY_ARROW_DOWN,  TB_MOD_CTRL | TB_MOD_ALT               },
-
-    {"\x1b[c",       TB_KEY_ARROW_RIGHT, TB_MOD_SHIFT                           },
-    {"\x1b\x1b[C",   TB_KEY_ARROW_RIGHT, TB_MOD_ALT                             },
-    {"\x1b\x1b[c",   TB_KEY_ARROW_RIGHT, TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1bOc",       TB_KEY_ARROW_RIGHT, TB_MOD_CTRL                            },
-    {"\x1b\x1bOc",   TB_KEY_ARROW_RIGHT, TB_MOD_CTRL | TB_MOD_ALT               },
-
-    {"\x1b[d",       TB_KEY_ARROW_LEFT,  TB_MOD_SHIFT                           },
-    {"\x1b\x1b[D",   TB_KEY_ARROW_LEFT,  TB_MOD_ALT                             },
-    {"\x1b\x1b[d",   TB_KEY_ARROW_LEFT,  TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1bOd",       TB_KEY_ARROW_LEFT,  TB_MOD_CTRL                            },
-    {"\x1b\x1bOd",   TB_KEY_ARROW_LEFT,  TB_MOD_CTRL | TB_MOD_ALT               },
-
-    // rxvt keys
-    {"\x1b[7$",      TB_KEY_HOME,        TB_MOD_SHIFT                           },
-    {"\x1b\x1b[7~",  TB_KEY_HOME,        TB_MOD_ALT                             },
-    {"\x1b\x1b[7$",  TB_KEY_HOME,        TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[7^",      TB_KEY_HOME,        TB_MOD_CTRL                            },
-    {"\x1b[7@",      TB_KEY_HOME,        TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b\x1b[7^",  TB_KEY_HOME,        TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[7@",  TB_KEY_HOME,        TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-
-    {"\x1b\x1b[8~",  TB_KEY_END,         TB_MOD_ALT                             },
-    {"\x1b\x1b[8$",  TB_KEY_END,         TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[8^",      TB_KEY_END,         TB_MOD_CTRL                            },
-    {"\x1b\x1b[8^",  TB_KEY_END,         TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[8@",  TB_KEY_END,         TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[8@",      TB_KEY_END,         TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[8$",      TB_KEY_END,         TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[2~",  TB_KEY_INSERT,      TB_MOD_ALT                             },
-    {"\x1b\x1b[2$",  TB_KEY_INSERT,      TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[2^",      TB_KEY_INSERT,      TB_MOD_CTRL                            },
-    {"\x1b\x1b[2^",  TB_KEY_INSERT,      TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[2@",  TB_KEY_INSERT,      TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[2@",      TB_KEY_INSERT,      TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[2$",      TB_KEY_INSERT,      TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[3~",  TB_KEY_DELETE,      TB_MOD_ALT                             },
-    {"\x1b\x1b[3$",  TB_KEY_DELETE,      TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[3^",      TB_KEY_DELETE,      TB_MOD_CTRL                            },
-    {"\x1b\x1b[3^",  TB_KEY_DELETE,      TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[3@",  TB_KEY_DELETE,      TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[3@",      TB_KEY_DELETE,      TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[3$",      TB_KEY_DELETE,      TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[5~",  TB_KEY_PGUP,        TB_MOD_ALT                             },
-    {"\x1b\x1b[5$",  TB_KEY_PGUP,        TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[5^",      TB_KEY_PGUP,        TB_MOD_CTRL                            },
-    {"\x1b\x1b[5^",  TB_KEY_PGUP,        TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[5@",  TB_KEY_PGUP,        TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[5@",      TB_KEY_PGUP,        TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[5$",      TB_KEY_PGUP,        TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[6~",  TB_KEY_PGDN,        TB_MOD_ALT                             },
-    {"\x1b\x1b[6$",  TB_KEY_PGDN,        TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[6^",      TB_KEY_PGDN,        TB_MOD_CTRL                            },
-    {"\x1b\x1b[6^",  TB_KEY_PGDN,        TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[6@",  TB_KEY_PGDN,        TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[6@",      TB_KEY_PGDN,        TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[6$",      TB_KEY_PGDN,        TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[11~", TB_KEY_F1,          TB_MOD_ALT                             },
-    {"\x1b\x1b[23~", TB_KEY_F1,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[11^",     TB_KEY_F1,          TB_MOD_CTRL                            },
-    {"\x1b\x1b[11^", TB_KEY_F1,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[23^", TB_KEY_F1,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[23^",     TB_KEY_F1,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[23~",     TB_KEY_F1,          TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[12~", TB_KEY_F2,          TB_MOD_ALT                             },
-    {"\x1b\x1b[24~", TB_KEY_F2,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[12^",     TB_KEY_F2,          TB_MOD_CTRL                            },
-    {"\x1b\x1b[12^", TB_KEY_F2,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[24^", TB_KEY_F2,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[24^",     TB_KEY_F2,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[24~",     TB_KEY_F2,          TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[13~", TB_KEY_F3,          TB_MOD_ALT                             },
-    {"\x1b\x1b[25~", TB_KEY_F3,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[13^",     TB_KEY_F3,          TB_MOD_CTRL                            },
-    {"\x1b\x1b[13^", TB_KEY_F3,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[25^", TB_KEY_F3,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[25^",     TB_KEY_F3,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[25~",     TB_KEY_F3,          TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[14~", TB_KEY_F4,          TB_MOD_ALT                             },
-    {"\x1b\x1b[26~", TB_KEY_F4,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[14^",     TB_KEY_F4,          TB_MOD_CTRL                            },
-    {"\x1b\x1b[14^", TB_KEY_F4,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[26^", TB_KEY_F4,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[26^",     TB_KEY_F4,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[26~",     TB_KEY_F4,          TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[15~", TB_KEY_F5,          TB_MOD_ALT                             },
-    {"\x1b\x1b[28~", TB_KEY_F5,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[15^",     TB_KEY_F5,          TB_MOD_CTRL                            },
-    {"\x1b\x1b[15^", TB_KEY_F5,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[28^", TB_KEY_F5,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[28^",     TB_KEY_F5,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[28~",     TB_KEY_F5,          TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[17~", TB_KEY_F6,          TB_MOD_ALT                             },
-    {"\x1b\x1b[29~", TB_KEY_F6,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[17^",     TB_KEY_F6,          TB_MOD_CTRL                            },
-    {"\x1b\x1b[17^", TB_KEY_F6,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[29^", TB_KEY_F6,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[29^",     TB_KEY_F6,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[29~",     TB_KEY_F6,          TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[18~", TB_KEY_F7,          TB_MOD_ALT                             },
-    {"\x1b\x1b[31~", TB_KEY_F7,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[18^",     TB_KEY_F7,          TB_MOD_CTRL                            },
-    {"\x1b\x1b[18^", TB_KEY_F7,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[31^", TB_KEY_F7,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[31^",     TB_KEY_F7,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[31~",     TB_KEY_F7,          TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[19~", TB_KEY_F8,          TB_MOD_ALT                             },
-    {"\x1b\x1b[32~", TB_KEY_F8,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[19^",     TB_KEY_F8,          TB_MOD_CTRL                            },
-    {"\x1b\x1b[19^", TB_KEY_F8,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[32^", TB_KEY_F8,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[32^",     TB_KEY_F8,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[32~",     TB_KEY_F8,          TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[20~", TB_KEY_F9,          TB_MOD_ALT                             },
-    {"\x1b\x1b[33~", TB_KEY_F9,          TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[20^",     TB_KEY_F9,          TB_MOD_CTRL                            },
-    {"\x1b\x1b[20^", TB_KEY_F9,          TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[33^", TB_KEY_F9,          TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[33^",     TB_KEY_F9,          TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[33~",     TB_KEY_F9,          TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[21~", TB_KEY_F10,         TB_MOD_ALT                             },
-    {"\x1b\x1b[34~", TB_KEY_F10,         TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[21^",     TB_KEY_F10,         TB_MOD_CTRL                            },
-    {"\x1b\x1b[21^", TB_KEY_F10,         TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[34^", TB_KEY_F10,         TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[34^",     TB_KEY_F10,         TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[34~",     TB_KEY_F10,         TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[23~", TB_KEY_F11,         TB_MOD_ALT                             },
-    {"\x1b\x1b[23$", TB_KEY_F11,         TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[23^",     TB_KEY_F11,         TB_MOD_CTRL                            },
-    {"\x1b\x1b[23^", TB_KEY_F11,         TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[23@", TB_KEY_F11,         TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[23@",     TB_KEY_F11,         TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[23$",     TB_KEY_F11,         TB_MOD_SHIFT                           },
-
-    {"\x1b\x1b[24~", TB_KEY_F12,         TB_MOD_ALT                             },
-    {"\x1b\x1b[24$", TB_KEY_F12,         TB_MOD_ALT | TB_MOD_SHIFT              },
-    {"\x1b[24^",     TB_KEY_F12,         TB_MOD_CTRL                            },
-    {"\x1b\x1b[24^", TB_KEY_F12,         TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1b\x1b[24@", TB_KEY_F12,         TB_MOD_CTRL | TB_MOD_ALT | TB_MOD_SHIFT},
-    {"\x1b[24@",     TB_KEY_F12,         TB_MOD_CTRL | TB_MOD_SHIFT             },
-    {"\x1b[24$",     TB_KEY_F12,         TB_MOD_SHIFT                           },
-
-    // linux console/putty arrows
-    {"\x1b[A",       TB_KEY_ARROW_UP,    TB_MOD_SHIFT                           },
-    {"\x1b[B",       TB_KEY_ARROW_DOWN,  TB_MOD_SHIFT                           },
-    {"\x1b[C",       TB_KEY_ARROW_RIGHT, TB_MOD_SHIFT                           },
-    {"\x1b[D",       TB_KEY_ARROW_LEFT,  TB_MOD_SHIFT                           },
-
-    // Home/End/PageUp/PageDown "plain": antes solo venian de terminfo, y si
-    // la base de terminfo no estaba disponible estas teclas no hacian nada.
-    {"\x1b[H",       TB_KEY_HOME,        TB_MOD_SHIFT                           },
-    {"\x1b[F",       TB_KEY_END,         TB_MOD_SHIFT                           },
-    {"\x1b[1~",      TB_KEY_HOME,        TB_MOD_SHIFT                           },
-    {"\x1b[4~",      TB_KEY_END,         TB_MOD_SHIFT                           },
-    {"\x1b[7~",      TB_KEY_HOME,        TB_MOD_SHIFT                           },
-    {"\x1b[8~",      TB_KEY_END,         TB_MOD_SHIFT                           },
-    {"\x1b[5~",      TB_KEY_PGUP,        TB_MOD_SHIFT                           },
-    {"\x1b[6~",      TB_KEY_PGDN,        TB_MOD_SHIFT                           },
-
-    // more putty arrows
-    {"\x1bOA",       TB_KEY_ARROW_UP,    TB_MOD_CTRL                            },
-    {"\x1b\x1bOA",   TB_KEY_ARROW_UP,    TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1bOB",       TB_KEY_ARROW_DOWN,  TB_MOD_CTRL                            },
-    {"\x1b\x1bOB",   TB_KEY_ARROW_DOWN,  TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1bOC",       TB_KEY_ARROW_RIGHT, TB_MOD_CTRL                            },
-    {"\x1b\x1bOC",   TB_KEY_ARROW_RIGHT, TB_MOD_CTRL | TB_MOD_ALT               },
-    {"\x1bOD",       TB_KEY_ARROW_LEFT,  TB_MOD_CTRL                            },
-    {"\x1b\x1bOD",   TB_KEY_ARROW_LEFT,  TB_MOD_CTRL | TB_MOD_ALT               },
-
-    {NULL,           0,                  0                                      },
-};
+#undef TB_ADD_CAP
+    return TB_OK;
+}
 
 static const unsigned char utf8_length[256] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -2380,6 +2198,10 @@ int tb_init_rwfd(int rfd, int wfd) {
     int rv;
 
     tb_reset();
+#ifdef TB_OPT_LIBC_WCHAR
+    /* wcwidth()/iswprint() de libc dependen del locale; musl trae C.UTF-8. */
+    setlocale(LC_CTYPE, "C.UTF-8");
+#endif
     global.ttyfd = isatty(rfd) ? rfd : (wfd != rfd && isatty(wfd) ? wfd : -1);
     global.rfd = rfd;
     global.wfd = wfd;
@@ -2979,16 +2801,12 @@ static int init_cap_trie(void) {
         if (rv != TB_OK && rv != TB_ERR_CAP_COLLISION) return rv;
     }
 
-    // Add built-in mod caps
-    //
-    // Collisions are OK here as well. This can happen if global.caps collides
-    // with builtin_mod_caps. It is desirable to give precedence to global.caps
-    // here.
-    for (i = 0; builtin_mod_caps[i].cap != NULL; i++) {
-        rv = cap_trie_add(builtin_mod_caps[i].cap, builtin_mod_caps[i].key,
-            builtin_mod_caps[i].mod);
-        if (rv != TB_OK && rv != TB_ERR_CAP_COLLISION) return rv;
-    }
+    // Add built-in mod caps (generadas en runtime, en el mismo orden que la
+    // tabla estatica que reemplazaron). Collisions are OK here as well: this
+    // can happen if global.caps collides with them, and it is desirable to
+    // give precedence to global.caps here.
+    rv = tb_add_builtin_mod_caps();
+    if (rv != TB_OK) return rv;
 
     return TB_OK;
 }

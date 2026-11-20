@@ -45,6 +45,10 @@ UI_SCRIPT_DEF = -DSWI_UI_SCRIPT="\"$(abspath $(UI_SCRIPT))\""
 
 CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic
 CFLAGS += $(MUSL_INC)
+# termbox2: usa wcwidth()/iswprint() de musl en vez de la tabla estatica de
+# 25K que traia el header (TB_OPT_LIBC_WCHAR). _GNU_SOURCE hace visible
+# wcwidth() en <wchar.h> con -std=c11.
+CFLAGS += -DTB_OPT_LIBC_WCHAR -D_GNU_SOURCE
 
 # agrega nounwind/optsize/minsize a los define del IR (clang -Oz lo hace en C).
 # Se salta los define con section/align/gc/prefix/prologue/personality/comdat
@@ -75,7 +79,8 @@ CFLAGS     += -Oz -DNDEBUG -ffunction-sections -fdata-sections
 # linkean PIE) NO lleva -fno-pic
 CBCFLAGS   := -Oz -DNDEBUG -ffunction-sections -fdata-sections -emit-llvm \
               -fno-pic -fno-pie -fno-unwind-tables -fno-asynchronous-unwind-tables \
-              -fno-stack-protector -fno-ident $(MUSL_INC)
+              -fno-stack-protector -fno-ident $(MUSL_INC) \
+              -DTB_OPT_LIBC_WCHAR -D_GNU_SOURCE
 LDFLAGS    := -Oz -no-pie $(LDFLAG_LTO) $(MUSL_LINK) -Wl,--gc-sections -Wl,--strip-all \
               -Wl,--build-id=none -Wl,-z,noseparate-code
 ifeq ($(MODE),opt-full)
