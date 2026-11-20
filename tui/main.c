@@ -372,6 +372,10 @@ int main(int argc, char **argv)
             } else if ((ev.type == IN_EV_KEY && ev.key == IN_KEY_BACKSPACE) ||
                        (ev.type == IN_EV_CHAR && ev.ch == 'h')) {
                 fileman_parent(g_fileman);
+            } else if (ev.type == IN_EV_CHAR && ev.ch == 's') {
+                int64_t order[MAX_NAMES];
+                fileman_reverse_order(g_fileman, order);
+                fileman_sort(g_fileman, order);
             } else if (ev.type == IN_EV_KEY && ev.key == IN_KEY_ESC) {
                 shell_set_focus(0);
             }

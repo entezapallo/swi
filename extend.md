@@ -263,6 +263,8 @@ El file manager vive en **`tui/fileman.ll`** (esto es lo que migró de C a IR).
 |---|---|
 | `fileman_new/destroy` | ciclo de vida del struct `{ cwd, names, n, sel, top }` |
 | `fileman_load` | listado vía `fsio_list_dir`; `..` siempre es la primera entrada |
+| `fileman_sort(fm, order)` | reordena el buffer de nombres; `order[i]` es el índice original que va en la posición `i` |
+| `fileman_reverse_order(fm, order)` | ejemplo mínimo: llena `order` con `n-1 … 0` |
 | `fileman_set_sel` | selección con clamp |
 | `fileman_scroll(fm, rows)` | ajusta `top` para que la selección quede visible |
 | `fileman_chdir` | valida con `chdir`, normaliza con `getcwd`, recarga |
@@ -274,18 +276,30 @@ En `main.c` quedan `fileman_open()` (abre un archivo o tab), `toggle_fileman()`
 (`ui_sync(FUI_FILEMAN)` + `fileman_load` + `set_focus(2)`) y `g_fm_rows`, que se
 calcula en `draw()` y usa el loop para `PageUp/Down`.
 
-Para agregar, por ejemplo, orden por fecha:
+### Cómo modificar la pestaña de file manager
 
-1. `fsio_list_dir` entrega solo nombres; necesitás metadatos. Agregá un
-   módulo IR `fsio/fsio_stat.ll` (o extendé `fsio_list_dir`) con `declare` en
-   `abi/tui_abi.h`. Ojo: llamar a `stat(2)` desde IR con musl dio problemas
-   en este build; `fsio_chdir`/`fsio_list_dir` son alternativas probadas.
-2. Ordená en `fileman_load()` (IR) **después** de traer el listado, no en el
-   IR de `fsio` (ese módulo no debe saber de UI).
-3. Agregá una tecla en el loop de `main.c` (con su `BIND` en `ui.fxl`) para
-   cambiar el criterio de orden.
-4. Test: `test/test_fileman.c` ya cubre listado, scroll y dibujo;sumá ahí el
-   caso de orden nuevo.
+`fileman_sort` **solo permuta**: recibe un `int64_t order[MAX_NAMES]` donde
+`order[i]` es el índice original de la entrada que debe quedar en la posición
+`i`. No decide criterios; eso lo hace el llamador. El buffer tiene 160 entradas
+de 160 bytes (`MAX_NAMES`) y la función copia a un temporal antes de rearmar,
+así que no se pierden nombres al permutar.
+
+El disparador actual es la tecla **`s`** dentro del panel (`main.c`, bloque
+`g_focus == 2`), que usa `fileman_reverse_order` como ejemplo mínimo para
+invertir la lista. Para cambiarlo:
+
+1. Escribí tu propio `order` en el llamador (por nombre, fecha, tamaño…). No
+   agregues criterios dentro de `fileman_sort`.
+2. Si necesitás metadatos, `fsio_list_dir` entrega solo nombres: agregá un
+   módulo IR `fsio/fsio_stat.ll` con `declare` en `abi/tui_abi.h`. Ojo: llamar
+   a `stat(2)` desde IR con musl dio problemas en este build;
+   `fsio_chdir`/`fsio_list_dir` son alternativas probadas.
+3. Llamá `fileman_sort(g_fileman, order)` justo después de `fileman_load()`, o
+   desde el handler de tecla en `main.c`.
+4. El `BIND` vive en `ui.fxl` si querés que el atajo sea configurable; las
+    teclas locales (como `s`) se cablean directo en `main.c`.
+5. Test: `test/test_fileman.c` cubre listado, scroll y dibujo; agregá ahí tu
+   caso de orden.
 
 ---
 

@@ -494,3 +494,81 @@ next:
 done:
   ret void
 }
+
+; ---------------------------------------------------------------------------
+; fileman_sort: reordena el buffer de nombres segun %order.
+; %order es un array de i64 con los indices deseados (order[i] = indice
+; original de la entrada que debe quedar en la posicion i). La funcion no
+; decide criterios: solo permuta. Los casos (nombre/fecha/tamano) se calculan
+; en el llamador. MAX_NAMES = 160, cada entrada ocupa 160 bytes.
+; ---------------------------------------------------------------------------
+define void @fileman_sort(ptr %fm, ptr %order) {
+entry:
+  %np = getelementptr inbounds %FileMan, ptr %fm, i32 0, i32 1
+  %names = load ptr, ptr %np
+  %cp = getelementptr inbounds %FileMan, ptr %fm, i32 0, i32 2
+  %n = load i64, ptr %cp
+  %tmp = call ptr @malloc(i64 25600)
+  %isnull = icmp eq ptr %tmp, null
+  br i1 %isnull, label %done, label %copy
+copy:
+  call ptr @memcpy(ptr %tmp, ptr %names, i64 25600)
+  br label %loop_init
+loop_init:
+  %ip = alloca i64
+  store i64 0, ptr %ip
+  br label %loop
+loop:
+  %i = load i64, ptr %ip
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %cleanup
+body:
+  %ordp = getelementptr i64, ptr %order, i64 %i
+  %src = load i64, ptr %ordp
+  %lo = icmp sge i64 %src, 0
+  %hi = icmp slt i64 %src, %n
+  %valid = and i1 %lo, %hi
+  br i1 %valid, label %do_copy, label %next
+do_copy:
+  %soff = mul i64 %src, 160
+  %doff = mul i64 %i, 160
+  %sp = getelementptr i8, ptr %tmp, i64 %soff
+  %dp = getelementptr i8, ptr %names, i64 %doff
+  call ptr @memcpy(ptr %dp, ptr %sp, i64 160)
+  br label %next
+next:
+  %inext = add i64 %i, 1
+  store i64 %inext, ptr %ip
+  br label %loop
+cleanup:
+  call void @free(ptr %tmp)
+  br label %done
+done:
+  ret void
+}
+
+; fileman_reverse_order: ejemplo minimo de orden calculado por el llamador.
+; Llena %order con n-1, n-2, ..., 0 (invierte la lista). No es un criterio
+; de orden "real": los casos fecha/nombre/tamano se documentan en extend.md.
+define void @fileman_reverse_order(ptr %fm, ptr %order) {
+entry:
+  %cp = getelementptr inbounds %FileMan, ptr %fm, i32 0, i32 2
+  %n = load i64, ptr %cp
+  %last = sub i64 %n, 1
+  %ip = alloca i64
+  store i64 0, ptr %ip
+  br label %loop
+loop:
+  %i = load i64, ptr %ip
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %src = sub i64 %last, %i
+  %slot = getelementptr i64, ptr %order, i64 %i
+  store i64 %src, ptr %slot
+  %inext = add i64 %i, 1
+  store i64 %inext, ptr %ip
+  br label %loop
+done:
+  ret void
+}

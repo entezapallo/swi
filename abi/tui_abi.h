@@ -128,6 +128,10 @@ extern char    *fileman_name(void *fm, int64_t i);
 extern void     fileman_set_sel(void *fm, int64_t sel);
 extern void     fileman_set_cwd(void *fm, const char *path);
 extern void     fileman_load(void *fm);
+/* fileman_sort: reordena el buffer de nombres segun order[i] = indice original.
+ * fileman_reverse_order: ejemplo de orden invertido calculado por el llamador. */
+extern void     fileman_sort(void *fm, const int64_t *order);
+extern void     fileman_reverse_order(void *fm, int64_t *order);
 extern void     fileman_scroll(void *fm, int64_t rows);
 extern void     fileman_parent(void *fm);
 extern int32_t  fileman_chdir(void *fm, const char *path);
