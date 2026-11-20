@@ -52,6 +52,13 @@ fexlswi/  intérprete Fexl (C restante) + binarios fexlswi / fexlswi0
 ui.fxl    driver Fexl persistente (layout y atajos)
 ```
 
+Frontera de la migración a IR: todo el **intérprete** (reducer, parser,
+builtins y driver) vive en `fexl/*.ll`. Quedan en C solo los módulos de
+algoritmos puros y sistemas que el intérprete llama como biblioteca de
+soporte: `bn` (enteros arbitrarios), `nacl` (criptografía) y `type_run`
+(procesos, sockets, termios). No tienen semántica de valores Fexl y su
+porte a IR escrito a mano no fue confiable (se intentó `bn` y se revirtió).
+
 Los 11 módulos de `regex/` son compartidos: `fexlswi` compila los 7 módulos del
 motor en `lib/fexlswi.bc` y en `lib/fexlswi_lib.bc` (el que consume `swi`), y
 `swi` compila aparte solo `replace` y `format` para su `fused.bc` — el resto
