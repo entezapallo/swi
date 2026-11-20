@@ -35,6 +35,7 @@
 @.s_load_time    = private constant [10 x i8] c"load_time\00"
 @.s_load_tuple   = private constant [11 x i8] c"load_tuple\00"
 @.s_load_var     = private constant [9 x i8] c"load_var\00"
+@.s_aot          = private constant [9 x i8] c"aot_eval\00"
 
 declare ptr  @Q(ptr)
 declare ptr  @Q0(ptr)
@@ -91,6 +92,7 @@ declare ptr @type_load_test(ptr)
 declare ptr @type_load_time(ptr)
 declare ptr @type_load_tuple(ptr)
 declare ptr @type_load_var(ptr)
+declare ptr @aot_eval(ptr)
 
 define private void @beg_const() {
 entry:
@@ -182,6 +184,8 @@ entry:
   call void @define(ptr @.s_load_tuple, ptr %q29)
   %q30 = call ptr @Q0(ptr @type_load_var)
   call void @define(ptr @.s_load_var, ptr %q30)
+  %qa = call ptr @Q(ptr @aot_eval)
+  call void @define(ptr @.s_aot, ptr %qa)
   ret void
 }
 
