@@ -24,7 +24,6 @@ swi/
 │                 type_argv, type_stream, type_file, die, format, report, limit,
 │                 type_fexl, type_signal, type_crypto, test, stream, base64,
 │                 type_time, show, type_bn, fexl, aot, sha256, sha512, crypto)
-├── fexlswi-llvm/      wrapper que delega en fexlswi-llvm + runtime .fxl + binarios
 ├── regex/        11 módulos IR de regex compartidos con fexlswi-llvm
 ├── ui.fxl        driver Fexl (layout, bindings, STATUS/LOG)
 ├── build*/       binarios generados
@@ -35,17 +34,18 @@ swi/
 
 ```bash
 make opt          # UN binario: swi + intérprete Fexl fusionados (LTO, -Oz)
-make opt-full     # opt + segunda ronda de Oz + flags de link agresivos
+make opt-full     # opt + adce + flags de link agresivos (por default)
 make selfh        # como opt pero sin globaldce en el fusionado
-make fast         # swi -O0 -g; fexlswi aparte (proceso hijo, como antes)
+make fast         # swi -O0 -g; fexlswi-llvm aparte (proceso hijo)
 make clean all    # limpia fexlswi-llvm y swi, sin compilar
 make install      # empaqueta build/ con un binario y una carpeta
 ./build/swi archivo.txt
 ```
 
 `make install` funciona después de `opt` u `opt-full`. `build/` queda con
-un solo binario (`swi`), el symlink `fexlswi-llvm/bin/fexlswi0 -> ../../swi` y una
-sola carpeta (`fexlswi-llvm/`, con las librerías Fexl en `src/lib`).
+un solo binario (`swi`), el symlink `build/fexlswi/bin/fexlswi0 -> ../../swi` y
+una carpeta `build/fexlswi/` con las librerías Fexl en `src/lib` (es la ruta que
+busca el driver; no existe un directorio `fexlswi/` en el repo).
 
 `make opt`, `opt-full` y `selfh` compilan **todo junto**: `fexlswi-llvm` genera
 `fexlswi_lib.bc` (sin internalizar, con `main -> fexl_main`) y `swi` lo linkea
@@ -107,8 +107,8 @@ separado. Si querés reconstruir solo el intérprete,
 ## Tests
 
 ```bash
-make test                  # 183 checks, perfil fast
+make test                  # 206 checks, perfil fast
 make test-opt
-make MODE=opt-full test
+make test-opt-full
 make test-selfh
 ```
