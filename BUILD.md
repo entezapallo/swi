@@ -47,7 +47,7 @@ fexl/     núcleo Fexl en IR: value_types, memory, value, str, parse,
           type_input, type_buf, type_parse, type_argv, type_stream, type_file,
           die, format, report, limit, type_fexl, type_signal, type_crypto,
           test, stream, base64, type_time, show, type_bn, fexl, aot,
-          sha256, sha512
+          sha256, sha512, crypto
 fexlswi/  intérprete Fexl (C restante) + binarios fexlswi / fexlswi0
 ui.fxl    driver Fexl persistente (layout y atajos)
 ```
