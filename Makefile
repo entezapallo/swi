@@ -1,5 +1,5 @@
-# Makefile unificado — swi + fexlswi (repo anidado), UN SOLO BINARIO en los
-# perfiles de tamano.
+# Makefile unificado — swi + fexlswi-llvm, UN SOLO BINARIO en los perfiles de
+# tamano. El lenguaje es un unico proyecto (fexlswi-llvm/) que se compila aparte.
 #
 #   make fast       swi -O0 -g; fexlswi aparte (proceso hijo, como antes)
 #   make opt        UN binario: swi + interprete Fexl fusionados (LTO, -Oz)
@@ -9,12 +9,13 @@
 #   make install    empaqueta build/ con un binario y una carpeta
 #
 # Un solo binario (perfiles LTO):
-#   - El interprete entra como bitcode (fexlswi/lib/fexlswi_lib.bc, que
-#     fexlswi/Makefile debe generar SIN internalizar y con main -> fexl_main).
+#   - El interprete entra como bitcode (fexlswi-llvm/lib/fexlswi_lib.bc, que
+#     fexlswi-llvm/Makefile genera SIN internalizar y con main -> fexl_main).
 #   - tui/main.c se compila con -Dmain=swi_main y un dispatch.c generado aca
 #     decide por basename(argv[0]): "fexl*" -> fexl_main, otro -> swi_main.
 #   - fexlswi0 es un symlink a swi (build/fexlswi/bin/fexlswi0 -> ../../swi).
 #     SWI_FEXL_BIN apunta a ese symlink; el hijo hereda argv[0]=ese path.
+#     (build/fexlswi/ es la carpeta de instalacion, no un directorio del repo.)
 #   - El motor regex viene dentro de fexlswi_lib.bc: no se duplica aqui.
 #
 # Los .o por modulo (arneses de test) siguen en PIC y sin filtros: solo el
@@ -55,9 +56,9 @@ CFLAGS += -DTB_OPT_LIBC_WCHAR -D_GNU_SOURCE
 # o metadata tras la lista de argumentos; verify falla fuerte si algo queda mal.
 ATTR_FILTER = sed -E '/^define /{/\)[^)]*([ ](section|align|gc|prefix|prologue|personality|comdat)[ ]|!)[^)]*\{$$/b;s/ \{$$/ nounwind optsize minsize {/}'
 
-# El lenguaje se compila aparte: fexlswi-llvm/Makefile tiene los perfiles y
-# flags; fexlswi/Makefile solo delega y publica bin/ y lib/. Aca tampoco se
-# duplican reglas de build ni de modulos regex.
+# El lenguaje es un proyecto aparte: fexlswi-llvm/Makefile tiene los perfiles,
+# flags, el runtime .fxl y el bitcode. Aca no se duplican reglas de build ni de
+# modulos regex.
 
 # --- swi: perfiles (BUILD cambiado segun MODE) ---
 ifneq ($(filter opt selfh opt-full,$(MODE)),)
@@ -88,6 +89,7 @@ ifeq ($(MODE),opt-full)
 LDFLAGS    += -Wl,-z,norelro -Wl,--hash-style=gnu -Wl,--no-rosegment
 endif
 LTO        := 1
+# En LTO el driver es el symlink a swi que crea swi-build en build/fexlswi/.
 FEXL       ?= build/fexlswi/bin/fexlswi0
 else
 BUILD      := build
@@ -96,7 +98,7 @@ LLC_OPTS   := -O0 -relocation-model=pic
 CFLAGS     += -O0 -g $(MUSL_LINK)
 LDFLAGS    := $(MUSL_LINK)
 LTO        :=
-FEXL       ?= fexlswi/bin/fexlswi0
+FEXL       ?= fexlswi-llvm/bin/fexlswi0
 endif
 
 # ruta ABSOLUTA al interprete (en LTO: el symlink a swi)
@@ -121,20 +123,21 @@ vpath %.ll tui $(CORE) $(REGEX) $(FSIO) $(FEXL_IR_DIR)
 # `make clean all`: clean limpia ambos y all no vuelve a compilar.
 ifneq ($(filter clean,$(MAKECMDGOALS)),)
 all:
-	@echo "swi + fexlswi limpios"
+	@echo "swi + fexlswi-llvm limpios"
 else
 all: opt
 endif
 
-# El lenguaje se compila en fexlswi-llvm; el wrapper fexlswi deja los productos
-# en fexlswi/bin y fexlswi/lib, que es donde este Makefile los consume.
+# El lenguaje se compila en fexlswi-llvm: este Makefile consume directamente
+# su bin/fexlswi0 y su lib/fexlswi_lib.bc.
 define BUILD_FEXL
-	rm -rf fexlswi/build/$(P) fexlswi/bin fexlswi/lib fexlswi/obj regex/build
-	$(MAKE) -C fexlswi $(P)
-	mkdir -p fexlswi/build/$(P)/bin fexlswi/build/$(P)/lib
-	cp -a fexlswi/bin/. fexlswi/build/$(P)/bin/
-	cp fexlswi/lib/*.bc fexlswi/build/$(P)/lib/
-	@echo "listo: fexlswi/build/$(P)/bin/fexlswi0"
+	rm -rf fexlswi-llvm/build/$(P) fexlswi-llvm/bin fexlswi-llvm/lib \
+	       fexlswi-llvm/obj regex/build
+	$(MAKE) -C fexlswi-llvm $(P)
+	mkdir -p fexlswi-llvm/build/$(P)/bin fexlswi-llvm/build/$(P)/lib
+	cp -a fexlswi-llvm/bin/. fexlswi-llvm/build/$(P)/bin/
+	cp fexlswi-llvm/lib/*.bc fexlswi-llvm/build/$(P)/lib/
+	@echo "listo: fexlswi-llvm/build/$(P)/bin/fexlswi0"
 endef
 
 fast: P := fast
@@ -158,9 +161,9 @@ selfh:
 	$(MAKE) MODE=selfh swi-build
 
 clean:
-	$(MAKE) -C fexlswi clean
-	rm -rf build build-opt .install-build
-	@echo "swi + fexlswi limpios"
+	$(MAKE) -C fexlswi-llvm clean
+	rm -rf build build-opt .install-build fexlswi
+	@echo "swi + fexlswi-llvm limpios"
 
 # Install: NO compila; empaqueta lo que produjo make opt / opt-full.
 # build/ queda con UN binario (swi), el symlink fexlswi0 y la carpeta fexlswi/
@@ -172,7 +175,7 @@ install:
 	mkdir -p .install-tmp
 	@if [ -f build/opt-full/swi ]; then cp build/opt-full/swi .install-tmp/swi; \
 	 else cp build/opt/swi .install-tmp/swi; fi
-	cp -a fexlswi/src/lib .install-tmp/lib
+	cp -a fexlswi-llvm/src/lib .install-tmp/lib
 	cp ui.fxl .install-tmp/ui.fxl
 	rm -rf build
 	mkdir -p build/fexlswi/bin build/fexlswi/src
@@ -196,7 +199,7 @@ swi-build: $(BUILD)/swi
 ifeq ($(LTO),1)
 	@mkdir -p build/fexlswi/bin
 	@ln -sfn ../../swi build/fexlswi/bin/fexlswi0
-	@test -e build/fexlswi/src || ln -sfn $(abspath fexlswi/src) build/fexlswi/src
+	@test -e build/fexlswi/src || ln -sfn $(abspath fexlswi-llvm/src) build/fexlswi/src
 endif
 
 $(BUILD):
@@ -223,7 +226,7 @@ $(BUILD)/main.bc: tui/main.c tui/in.h tui/out.h tui/eval.h tui/fexl_ui.h tui/ter
 	$(CLANG) $(CBCFLAGS) -Dmain=swi_main $(EVAL_DEF) $(UI_SCRIPT_DEF) -I. -c $< -o $@
 
 define DISPATCH_C
-/* generado por el Makefile: un ELF, dos personalidades (swi / fexlswi) */
+/* generado por el Makefile: un ELF, dos personalidades (swi / fexl_main) */
 extern int swi_main(int, char **);
 extern int fexl_main(int, char **);
 int main(int argc, char **argv) {
@@ -285,7 +288,7 @@ ifeq ($(LTO),1)
 C_BC += $(BUILD)/dispatch.bc
 
 # el motor regex ya viene dentro de fexlswi_lib.bc: no duplicarlo
-FEXL_LIB    := fexlswi/lib/fexlswi_lib.bc
+FEXL_LIB    := fexlswi-llvm/lib/fexlswi_lib.bc
 FUSED_LL_BC := $(filter-out $(addprefix $(BUILD)/,$(addsuffix .bc,regex_parser regex_compiler regex_thread regex_runner)),$(LL_BC))
 
 $(BUILD)/fused.bc: $(FUSED_LL_BC) $(C_BC) $(FEXL_LIB)

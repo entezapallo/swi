@@ -6,7 +6,7 @@
 ; regex_runner y rx_query). LLVM IR no tiene `include`, por eso se inyecta
 ; por concatenacion en las reglas del Makefile.
 ;
-; DEBEN coincidir con la ABI usada por type_regex.c (fexlswi/src/regex_abi.h).
+; DEBEN coincidir con la ABI usada por type_regex.c (fexlswi-llvm/src/regex_abi.h).
 
 %RxInst    = type { i64, i64, i64 }  ; opcode, arg1, arg2
 %RxProgram = type { ptr, i64, i64 }  ; instructions, count, num_groups

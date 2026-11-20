@@ -4,7 +4,7 @@
 /*
  * Frontera C <-> IR del intérprete Fexl (Paso 1 de la migración a LLVM).
  *
- * Los módulos fexlswi/src/type_*.c que todavía están en C siguen incluyendo
+ * Los módulos fexlswi-llvm/src/type_*.c que todavía están en C siguen incluyendo
  * sus headers originales (value.h, memory.h, str.h) y linkan contra los
  * símbolos que ahora definen fexl/value.ll, fexl/memory.ll y fexl/str.ll.
  * Este header es el espejo canónico de esa frontera: lo usan los arneses de

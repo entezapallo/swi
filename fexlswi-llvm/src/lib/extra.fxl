@@ -1,0 +1,58 @@
+# (default d x) = x if x is good, otherwise d.
+\default=(\\d\x is_defined x x d)
+# (check x d) = x if x is good, otherwise d.
+\check=(\x is_defined x x)
+
+# The local directory is one level above the script name.
+\script_name=(default ""; argv 1)
+\dir_local=(. (dirname script_name) "/")
+
+\parse_local=(\name parse_file; . dir_local name)
+\use=(\name evaluate; parse_local name)
+
+\trace=(fsay stderr)
+\error=(\msg trace msg die)
+
+# (if x y) = y if x is true, otherwise I.
+\if=(\\x\\y x y I)
+
+\NL="
+"
+\TAB="	"
+\CR=(chr 13)
+\LF=NL
+\QU=~ "~
+
+\run_benchmark=
+	(\\show\\f
+	fexl_benchmark f \val\steps\bytes
+	show ["steps "steps" bytes "bytes]
+	val
+	)
+
+\do_benchmark=(run_benchmark trace)
+\show_benchmark=(run_benchmark say)
+
+\is_record= # LATER 20250725 built-in
+	(\obj
+	is_good (record_count obj)
+	)
+
+[
+["dir_local" dir_local]
+["default" default]
+["check" check]
+["parse_local" parse_local]
+["use" use]
+["trace" trace]
+["error" error]
+["if" if]
+["NL" NL]
+["TAB" TAB]
+["CR" CR]
+["LF" LF]
+["QU" QU]
+["do_benchmark" do_benchmark]
+["show_benchmark" show_benchmark]
+["is_record" is_record]
+]

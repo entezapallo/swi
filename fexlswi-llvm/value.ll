@@ -1,5 +1,5 @@
 ; fexl/value.ll — reducer y managed de referencias del intérprete Fexl.
-; Reemplaza fexlswi/src/value.c. Expone las mismas funciones C, así que los
+; Reemplaza fexlswi-llvm/src/value.c. Expone las mismas funciones C, así que los
 ; módulos `type_*.c` que siguen en C linkan sin cambios.
 ;
 ; %value viene de value_types.ll (se inyecta por concatenación en el build).

@@ -10,7 +10,7 @@
  * batch (spec seccion 8: "console solo llama al intérprete").
  *
  * El path del binario se puede fijar en compilacion con
- * -DSWI_FEXL_BIN="..." (por defecto fexlswi/bin/fexlswi0).
+ * -DSWI_FEXL_BIN="..." (por defecto fexlswi-llvm/bin/fexlswi0).
  */
 
 #include <stdint.h>

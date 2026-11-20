@@ -14,7 +14,7 @@
 #include "../abi/tui_abi.h"
 
 #ifndef SWI_FEXL_BIN
-#define SWI_FEXL_BIN "fexlswi/bin/fexlswi0"
+#define SWI_FEXL_BIN "fexlswi-llvm/bin/fexlswi0"
 #endif
 #ifndef SWI_UI_SCRIPT
 #define SWI_UI_SCRIPT "ui.fxl"

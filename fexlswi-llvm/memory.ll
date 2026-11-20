@@ -1,5 +1,5 @@
 ; fexl/memory.ll — allocator contado del intérprete Fexl.
-; Reemplaza fexlswi/src/memory.c. Expone las mismas globals y funciones C
+; Reemplaza fexlswi-llvm/src/memory.c. Expone las mismas globals y funciones C
 ; (cur_blocks, cur_bytes, new_memory, resize_memory, free_memory, end_memory)
 ; para que los módulos C que quedan sigan linkando sin cambios.
 

@@ -1,0 +1,10 @@
+#
+\and=(\\x\\y x y F)
+\or=(\\x\\y x T y)
+\not=(\\x x F T)
+
+[
+["and" and]
+["not" not]
+["or" or]
+]

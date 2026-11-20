@@ -1,7 +1,7 @@
 # swi
 
 TUI modal sobre el motor jotter. Proyecto **autocontenido en un solo repo**:
-`fexlswi/` es código normal (intérprete Fexl y binarios), y los módulos regex
+`fexlswi-llvm/` es código normal (intérprete Fexl y binarios), y los módulos regex
 están unificados en `regex/`. No hay submodules.
 
 ## Compilación
@@ -19,8 +19,8 @@ make test-opt-full
 make test-selfh
 ```
 
-Cada target compila primero `fexlswi` y después `swi`. En los perfiles LTO
-(`opt`, `opt-full`, `selfh`) `fexlswi` entrega `lib/fexlswi_lib.bc` y `swi`
+Cada target compila primero `fexlswi-llvm` y después `swi`. En los perfiles LTO
+(`opt`, `opt-full`, `selfh`) `fexlswi-llvm` entrega `lib/fexlswi_lib.bc` y `swi`
 lo linkea consigo: hay **un solo ELF** por perfil en `build/<perfil>/swi`, y
 `build/swi` es el último perfil compilado. Un `dispatch.c` generado por el
 Makefile decide por `basename(argv[0])` si entra a `fexl_main` o `swi_main`;
@@ -57,7 +57,7 @@ fsio/     módulos IR de fsio (incluye fsio_getdents.ll para musl)
 fexlswi-llvm/  intérprete Fexl en IR (~47 .ll) + C residual en src/
                (bn, nacl, type_run, type_regex, type_script) + Makefile propio.
                Se compila APARTE de swi; entrega lib/fexlswi_lib.bc.
-fexlswi/  wrapper que delega en fexlswi-llvm y publica bin/ y lib/,
+fexlswi-llvm/  wrapper que delega en fexlswi-llvm y publica bin/ y lib/,
           más el runtime .fxl en src/lib/
 ui.fxl    driver Fexl persistente (layout y atajos)
 ```
@@ -68,10 +68,10 @@ algoritmos puros y sistemas que el intérprete llama como biblioteca de
 soporte: `bn` (enteros arbitrarios), `nacl` (criptografía), `type_run`
 (procesos, sockets, termios), `type_regex` y `type_script`. No tienen semántica
 de valores Fexl y su porte a IR escrito a mano no fue confiable (se intentó
-`bn` y se revirtió). Están en `fexlswi-llvm/src/`; `fexlswi/src/` solo conserva
+`bn` y se revirtió). Están en `fexlswi-llvm/src/`; `fexlswi-llvm/src/` solo conserva
 el runtime `.fxl`. Ver `fexlswi-llvm/README.md`.
 
-Los 11 módulos de `regex/` son compartidos: `fexlswi` compila los 7 módulos del
+Los 11 módulos de `regex/` son compartidos: `fexlswi-llvm` compila los 7 módulos del
 motor en `lib/fexlswi.bc` y en `lib/fexlswi_lib.bc` (el que consume `swi`), y
 `swi` compila aparte solo `replace` y `format` para su `fused.bc` — el resto
 viene dentro de `fexlswi_lib.bc`, así no hay símbolos duplicados. `rx_types.ll`
@@ -84,7 +84,7 @@ rpath a `/usr/lib/x86_64-linux-musl`.
 ## Dependencias
 
 - Toolchain LLVM: `clang-21`, `opt-21`, `llc-21`, `llvm-link-21`, `lld-21`.
-- Fexl: en `fast`, `fexlswi/bin/fexlswi0` (ELF aparte); en los perfiles LTO,
+- Fexl: en `fast`, `fexlswi-llvm/bin/fexlswi0` (ELF aparte); en los perfiles LTO,
   `build/fexlswi/bin/fexlswi0` (symlink al mismo `swi`). Override:
   ```bash
   make FEXL=/otro/fexlswi0 swi-fast

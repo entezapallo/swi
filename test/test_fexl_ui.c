@@ -5,7 +5,7 @@
 #include "tui/fexl_ui.h"
 
 #ifndef SWI_FEXL_BIN
-#define SWI_FEXL_BIN "fexlswi/bin/fexlswi0"
+#define SWI_FEXL_BIN "fexlswi-llvm/bin/fexlswi0"
 #endif
 
 static int g_pass = 0, g_fail = 0;

@@ -23,7 +23,7 @@
 #include "eval.h"
 
 #ifndef SWI_FEXL_BIN
-#define SWI_FEXL_BIN "fexlswi/bin/fexlswi0"
+#define SWI_FEXL_BIN "fexlswi-llvm/bin/fexlswi0"
 #endif
 
 #define SWI_EVAL_SESSION_FMT "/tmp/swi_fexl_session_%d.fxl"

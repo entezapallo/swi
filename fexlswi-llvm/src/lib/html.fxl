@@ -1,0 +1,160 @@
+# Quote a character for embedding in HTML.
+\quote_ch=
+	(\ch
+	eq ch "&" "&amp;" ;
+	eq ch ~ "~ "&quot;" ;
+	eq ch "<" "&lt;" ;
+	eq ch ">" "&gt;" ;
+	ch
+	)
+
+# LATER 20181230 Accelerate the quote_str function in C.
+
+# Quote a string for embedding in HTML.
+\quote_str=(str_map quote_ch)
+
+# Quote arbitrary data.
+\quote=
+	(@\\quote\x
+	is_str x (quote_str x);
+	is_num x x;
+	is_tuple x (list_to_tuple; map quote; tuple_to_list x);
+	is_list x (map quote x);
+	is_bool x x;
+	void
+	)
+
+\colgroup=
+	(\widths
+	say "<colgroup>"
+	each widths (\width say ["<col width=" width ">"])
+	say "</colgroup>"
+	)
+
+\tag_enclosure=
+	(\desc
+	\beg=(to_str desc)
+	\pos=(search beg " " 0)
+	\end=(is_good pos (slice beg 0 pos) beg)
+	{ beg end }
+	)
+
+\_tag=
+	(\desc\\body
+	tag_enclosure desc \beg\end
+	put ["<" beg ">"]
+	body
+	put ["</" end ">"]
+	)
+
+\tag=
+	(\desc\\body
+	tag_enclosure desc \beg\end
+	put ["<" beg ">"]
+	(
+	eq end "td" I;
+	eq end "th" I;
+	eq end "a" I;
+	nl
+	)
+	body
+	put ["</" end ">"]
+	nl
+	)
+
+\tr=(tag "tr")
+
+\put_quote_data=(render_data (\x put (quote x)))
+
+# https://en.wikipedia.org/wiki/Percent-encoding
+\uri_escape=
+	(
+	\table=empty
+	\reserve=
+		(\ch
+		\code=(. "%" (hex_byte (ord ch)))
+		set table ch code
+		)
+	set table " " "+" # Special rule for space
+	reserve "!"
+	reserve "*"
+	reserve "'"
+	reserve "("
+	reserve ")"
+	reserve ";"
+	reserve ":"
+	reserve "@"
+	reserve "&"
+	reserve "="
+	reserve "+"
+	reserve "$"
+	reserve ","
+	reserve "/"
+	reserve "?"
+	reserve "#"
+	reserve "["
+	reserve "]"
+	reserve "%"
+	reserve "\" # Need this otherwise browser treats same as slash.
+	reserve QU # Need this for quotes in path names.
+	reserve NL
+	reserve CR
+
+	str_map \ch
+	get table ch ch ()
+	)
+
+\uri_unescape=
+	(\str
+	\buf=buf_new
+	\source=(readstr str)
+
+	@\\loop
+	\ch=(sget source)
+	is_undef ch (buf_get buf);
+	eq ch "+"
+		(
+		buf_put buf " "
+		loop
+		);
+	eq ch "%"
+		(
+		\x=(hex_digit_to_dec (sget source))
+		\y=(hex_digit_to_dec (sget source))
+		buf_put buf (chr; + (* 16 x) y)
+		loop
+		);
+	buf_put buf ch
+	loop
+	)
+
+\make_url=
+	(\params
+	\params=
+		(map_good
+			(\pair pair \key\val
+			\val=(is_num val (num_str val) val)
+			eq val "" void;
+			\q_key=(uri_escape key)
+			\q_val=(uri_escape val)
+			[q_key"="q_val]
+			)
+			params)
+
+	\url=(join "&amp;" params)
+	\url=(eq url "" "." (. "?" url))
+	url
+	)
+
+[
+["quote_ch" quote_ch]
+["quote" quote]
+["colgroup" colgroup]
+["_tag" _tag]
+["tag" tag]
+["tr" tr]
+["put_quote_data" put_quote_data]
+["uri_escape" uri_escape]
+["uri_unescape" uri_unescape]
+["make_url" make_url]
+]

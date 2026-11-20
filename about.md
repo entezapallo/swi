@@ -27,7 +27,7 @@ quoted), así que la consola no podía correr dentro del driver. La solución fu
   re-evalúa el script completo, así que las definiciones sobreviven.
 
 El hijo es un **proceso** aparte, no una librería compartida. En `fast` es un
-ELF propio (`fexlswi/bin/fexlswi0`); en `opt`/`opt-full`/`selfh` es el **mismo
+ELF propio (`fexlswi-llvm/bin/fexlswi0`); en `opt`/`opt-full`/`selfh` es el **mismo
 ELF** que `swi` vía un symlink (`build/fexlswi/bin/fexlswi0 -> ../../swi`) y un
 `dispatch.c` que elige `fexl_main` o `swi_main` según `argv[0]`. Todo es musl
 dinámico. El sufijo `0` evita que Fexl cargue `main.fxl`. Ver `scripting.md`, §1.
@@ -36,10 +36,10 @@ dinámico. El sufijo `0` evita que Fexl cargue `main.fxl`. Ver `scripting.md`, �
 
 No son opcionales: `format.ll` (resaltado) llama a `regex_compile`,
 `rx_charclass_*`, `rx_run` y `thread_*`, y `document.ll` usa `replace_all`.
-Los patrones de usuario se evalúan en `fexlswi`, pero el resaltado en pantalla
+Los patrones de usuario se evalúan en `fexlswi-llvm`, pero el resaltado en pantalla
 se calcula dentro del editor con esos módulos.
 
-Antes había dos copias del motor: `fexlswi/regex/` y `regex/` de swi. Hoy
+Antes había dos copias del motor: `fexlswi-llvm/regex/` y `regex/` de swi. Hoy
 **un solo directorio `regex/`** con 11 módulos lo comparten ambos binarios.
 `rx_types.ll` tiene la única definición de `%RxInst`/`%RxProgram` y se inyecta
 por concatenación en el build (IR no tiene `include`). Detalles en
@@ -60,7 +60,7 @@ eliminó: hay un solo `swi` por perfil.
 | `opt-full` | `-Oz` + LTO con `internalize` | binario mínimo, safe |
 | `selfh` | `-Oz` + LTO sin pases extra | build desde fuentes |
 
-Los cuatro compilan con target `x86_64-linux-musl` y link dinámico. `fexlswi`
+Los cuatro compilan con target `x86_64-linux-musl` y link dinámico. `fexlswi-llvm`
 tiene sus propios `opt`/`selfh`, también musl dinámicos. Ver `BUILD.md`.
 
 ## Sesión

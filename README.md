@@ -24,7 +24,7 @@ swi/
 │                 type_argv, type_stream, type_file, die, format, report, limit,
 │                 type_fexl, type_signal, type_crypto, test, stream, base64,
 │                 type_time, show, type_bn, fexl, aot, sha256, sha512, crypto)
-├── fexlswi/      wrapper que delega en fexlswi-llvm + runtime .fxl + binarios
+├── fexlswi-llvm/      wrapper que delega en fexlswi-llvm + runtime .fxl + binarios
 ├── regex/        11 módulos IR de regex compartidos con fexlswi-llvm
 ├── ui.fxl        driver Fexl (layout, bindings, STATUS/LOG)
 ├── build*/       binarios generados
@@ -38,21 +38,21 @@ make opt          # UN binario: swi + intérprete Fexl fusionados (LTO, -Oz)
 make opt-full     # opt + segunda ronda de Oz + flags de link agresivos
 make selfh        # como opt pero sin globaldce en el fusionado
 make fast         # swi -O0 -g; fexlswi aparte (proceso hijo, como antes)
-make clean all    # limpia fexlswi y swi, sin compilar
+make clean all    # limpia fexlswi-llvm y swi, sin compilar
 make install      # empaqueta build/ con un binario y una carpeta
 ./build/swi archivo.txt
 ```
 
 `make install` funciona después de `opt` u `opt-full`. `build/` queda con
-un solo binario (`swi`), el symlink `fexlswi/bin/fexlswi0 -> ../../swi` y una
-sola carpeta (`fexlswi/`, con las librerías Fexl en `src/lib`).
+un solo binario (`swi`), el symlink `fexlswi-llvm/bin/fexlswi0 -> ../../swi` y una
+sola carpeta (`fexlswi-llvm/`, con las librerías Fexl en `src/lib`).
 
-`make opt`, `opt-full` y `selfh` compilan **todo junto**: `fexlswi` genera
+`make opt`, `opt-full` y `selfh` compilan **todo junto**: `fexlswi-llvm` genera
 `fexlswi_lib.bc` (sin internalizar, con `main -> fexl_main`) y `swi` lo linkea
 consigo en `fused.bc`; un `dispatch.c` generado elige `fexl_main` o `swi_main`
 según `argv[0]`. `fast` mantiene dos ELF separados. No hace falta un paso previo
 separado. Si querés reconstruir solo el intérprete,
-`make -C fexlswi clean all` sigue funcionando.
+`make -C fexlswi-llvm clean all` sigue funcionando.
 
 ## Diseño
 
@@ -100,7 +100,7 @@ separado. Si querés reconstruir solo el intérprete,
 | `about.md` | arquitectura y decisiones de diseño |
 | `cheatsheet.md` | teclas, comandos y resolución de problemas |
 | `extend.md` | cómo extender la UI (paneles, teclas, builtins) |
-| `scripting.md` | Fexl, protocolo, fexlswi y la API regex |
+| `scripting.md` | Fexl, protocolo, fexlswi-llvm y la API regex |
 | `addformat.md` | cómo agregar formateadores de sintaxis desde Fexl |
 | `spec.md` | especificación original del proyecto (histórica) |
 

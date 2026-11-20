@@ -1,0 +1,133 @@
+# (Sat 2018-07-28 In memoriam, Charlie the cat, thank you little friend.)
+
+\get_key=
+	(\key @\\loop \list
+	list void \pair\list
+	pair \this_key\\this_val
+	eq key this_key this_val;
+	loop list
+	)
+
+\del_key=
+	(\key @\\loop \list
+	list [] \pair\list
+	pair \this_key\\this_val
+	eq key this_key list;
+	\list=(loop list)
+	[pair;list]
+	)
+
+\put_key=
+	(\key\val
+	@\\loop \list
+	list [{key val}] \pair\list
+	pair \this_key\\this_val
+	eq key this_key [{this_key val};list];
+	\list=(loop list)
+	[pair;list]
+	)
+
+\push_key=
+	(\key\val\list
+	[{key val};list]
+	)
+
+\update_key=
+	(\key\update @\\loop \list
+	list
+		(
+		\val=(update void)
+		[{key val}]
+		)
+	\pair\list
+	pair \this_key\\this_val
+	eq key this_key
+		(
+		\val=(update this_val)
+		[{this_key val};list]
+		);
+	\list=(loop list)
+	[pair;list]
+	)
+
+\add_key=
+	(\key\val
+	update_key key (\total is_defined total (+ total val) val)
+	)
+
+\update_values=
+	(\update
+	map
+		(\pair
+		pair \key\\val
+		\val=(update key val)
+		{key val}
+		)
+	)
+
+# (sort_pairs list) Sort the list of pairs by key.
+\sort_pairs=
+	(\\xs
+
+	\obj=empty
+	each xs
+		(\x
+		x \\k\\_
+		\_=(rmod obj k [] (\\xs [x;xs]))
+		)
+
+	record_collect obj
+		(\item\\tail
+		item \\key\\list
+		append (reverse list);
+		tail
+		)
+	)
+
+\put_default=
+	(\key\dval\list
+	\val=(get_key key list)
+	is_defined val list;
+	[{key dval};list]
+	)
+
+\name_columns=
+	(@\\loop\keys\vals
+	keys [] \key\keys
+	vals [] \val\vals
+	\tail=(loop keys vals)
+	[{key val};tail]
+	)
+
+\make_assoc=
+	(\extract\xs
+
+	\obj=empty
+	each xs
+		(\x
+		\k=(extract x)
+		get obj k
+			(
+			setf obj k x # Keep the first.
+			)
+			(\\_
+			)
+		)
+
+	record_pairs obj
+	)
+
+[
+[":" get_key] # Handy synonym
+["get_key" get_key]
+["del_key" del_key]
+["put_key" put_key]
+["push_key" push_key]
+["update_key" update_key]
+["add_key" add_key]
+["update_values" update_values]
+["sort_pairs" sort_pairs]
+["put_default" put_default]
+["name_columns" name_columns]
+["make_assoc" make_assoc]
+]

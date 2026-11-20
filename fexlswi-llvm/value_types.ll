@@ -3,7 +3,7 @@
 ; Se inyecta por concatenación al compilar cada módulo IR (LLVM IR no tiene
 ; `include`), igual que regex/rx_types.ll. No se compila como módulo suelto.
 ;
-; %value es el espejo exacto de `struct value` (fexlswi/src/value.h):
+; %value es el espejo exacto de `struct value` (fexlswi-llvm/src/value.h):
 ;
 ;   union { unsigned long N; value next; };            offset  0, 8 bytes
 ;   union { type T; void (*clear)(value); };           offset  8, 8 bytes

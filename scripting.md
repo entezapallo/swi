@@ -34,10 +34,10 @@ hijo con el mismo binario. En `fast` sigue habiendo dos ELF separados.
 `fexlswi.bc` / `fexlswi_lib.bc` = intérprete Fexl + tipo `regex` + tipo
 `rxsession` + los 7 módulos IR del motor. Todo es **musl dinámico**, igual que
 `swi` (no se usa como librería compartida: se invoca como proceso, o se linkea
-como bitcode en el fusionado). Ver `fexlswi/BUILD.md`.
+como bitcode en el fusionado). Ver `fexlswi-llvm/BUILD.md`.
 
 El path se inyecta en compilación (`EVAL_DEF` en el Makefile raíz) con valor
-absoluto: `fexlswi/bin/fexlswi0` en `fast` y `build/fexlswi/bin/fexlswi0`
+absoluto: `fexlswi-llvm/bin/fexlswi0` en `fast` y `build/fexlswi/bin/fexlswi0`
 (symlink) en los perfiles LTO. Se puede sobrescribir con
 `make FEXL=/otro/fexlswi0`.
 
@@ -166,7 +166,7 @@ de sesión). No sobreviven las definiciones puestas directamente en `ui.fxl`
 
 ## 4. API regex desde Fexl
 
-Definida en `fexlswi/src/type_regex.c` (`regex.compile`… `abregex.compile`):
+Definida en `fexlswi-llvm/src/type_regex.c` (`regex.compile`… `abregex.compile`):
 
 | Función | Resultado |
 |---|---|
@@ -193,7 +193,7 @@ say (abregex.define ses "@key::if|then|else;")
 
 `abregex.define` recibe un **string** con definiciones `@nombre::patron;`
 (no una lista), y `abregex.compile` busca ese nombre en la sesión. El formato
-está probado en `fexlswi/test/regex.fxl`.
+está probado en `fexlswi-llvm/test/regex.fxl`.
 
 `regex.spans` es la base del resaltado: `ui.fxl` emite `SPANS <style_id>
 <start,end;...>` y `main.c` los aplica con `fmt_add_span()`. Ver `addformat.md`.
@@ -211,9 +211,9 @@ false
 ```
 
 Los switches se persisten en `/tmp/swi_switches.txt` (`nombre=0|1` por
-línea, implementado en `fexlswi/src/type_script.c`), no en la sesión: por eso
+línea, implementado en `fexlswi-llvm/src/type_script.c`), no en la sesión: por eso
 sobreviven al hot reload y a procesos. Son útiles para opciones de UI que se
-prenden/apagan desde la consola. Ejecutable en `fexlswi/test/regex.fxl`.
+prenden/apagan desde la consola. Ejecutable en `fexlswi-llvm/test/regex.fxl`.
 
 `load_script()` también expone `true`/`false` como alias de los booleanos de
 Fexl. Los *init tools* son simplemente el archivo que se pasa al intérprete al
@@ -227,7 +227,7 @@ Esta es la distinción que más confunde:
 
 | Uso | Dónde corre | Para qué | Cómo se compila |
 |---|---|---|---|
-| **Regex en Fexl** | proceso `fexlswi0` | scripting: `ui.fxl`, consola, patrones de color | `fexlswi/src/build_regex` → `lib/fexlswi.bc` |
+| **Regex en Fexl** | proceso `fexlswi0` | scripting: `ui.fxl`, consola, patrones de color | `fexlswi-llvm/src/build_regex` → `lib/fexlswi.bc` |
 | **Regex en IR** | dentro de `swi` | `format.ll` (resaltado), `replace.ll` (`:s`), `document.ll` | `swi/Makefile` → `build/<perfil>/fused.bc` |
 
 Ambos consumen **los mismos 11 módulos fuente** en `regex/`:
@@ -252,7 +252,7 @@ cat regex/rx_types.ll regex/format.ll | opt-21 ... -o build/opt/format.bc
 ```
 
 LLVM IR no tiene `include`, por eso se concatena en vez de importar. Lo hace
-tanto `fexlswi/Makefile` como `swi/Makefile` (reglas `REGLAS_REGEX` y
+tanto `fexlswi-llvm/Makefile` como `swi/Makefile` (reglas `REGLAS_REGEX` y
 `REGEX_LL`).
 
 `swi` linkea `fexlswi_lib.bc` dentro de su binario en los perfiles LTO (es el

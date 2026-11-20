@@ -86,7 +86,7 @@ make MODE=opt-full test
 make FEXL=/otro/fexlswi0 opt # override del intérprete
 ```
 
-`make opt` (y los otros perfiles) compila `fexlswi` primero: no hace falta un
+`make opt` (y los otros perfiles) compila `fexlswi-llvm` primero: no hace falta un
 paso previo. Ver `BUILD.md`, `scripting.md` y `extend.md`.
 
 ## Problemas comunes
@@ -96,7 +96,7 @@ paso previo. Ver `BUILD.md`, `scripting.md` y `extend.md`.
 - **F2/F3/F4 no hacen nada**: los capturó el escritorio. Usá `Ctrl+E/F/B`.
 - **No se ve el archivo**: el buffer se abre vacío si se creó con `Ctrl+T`;
   abrilo con `./swi archivo` o `:e <ruta>`.
-- **Sin salida Fexl**: el driver no arrancó; revisá `fexlswi/bin/fexlswi0`
+- **Sin salida Fexl**: el driver no arrancó; revisá `fexlswi-llvm/bin/fexlswi0`
   (`fast`) o `build/fexlswi/bin/fexlswi0` (perfiles LTO, symlink a `swi`) y el
   log de la consola.
 - **Se perdió el resaltado**: escaped y volvé a buscar; los spans se

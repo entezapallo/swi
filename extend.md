@@ -328,7 +328,7 @@ make test && make test-opt && make MODE=opt-full test && make test-selfh
 ```
 
 Si el driver Fexl no responde, mirá el log de la consola y
-`fexlswi/bin/fexlswi0`. Si el módulo IR falla en `opt-full` pero no en `fast`,
+`fexlswi-llvm/bin/fexlswi0`. Si el módulo IR falla en `opt-full` pero no en `fast`,
 buscá símbolos sin `declare` (LTO con `globaldce` los delata).
 
 Para probar cambios de `ui.fxl` sin recompilar: editá el archivo y el hot
